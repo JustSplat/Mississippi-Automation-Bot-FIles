@@ -1,3 +1,4 @@
+
 const {
     Client,
     GatewayIntentBits,
@@ -363,7 +364,7 @@ function createListButtons(listType, page, totalPages) {
     );
 }
 
-async function sendERLCList(channel, listType) {
+async function sendERLCList(message, listType) {
     const allPlayers = await getERLCPlayers();
 
     const list = listType === 'staff'
@@ -381,9 +382,10 @@ async function sendERLCList(channel, listType) {
         ? [createListButtons(listType, 0, totalPages)]
         : [];
 
-    await channel.send({
+    await message.reply({
         embeds: [embed],
-        components
+        components,
+        allowedMentions: { repliedUser: false }
     });
 }
 
@@ -752,41 +754,6 @@ client.on('messageCreate', async message => {
     const content = message.content.trim().toLowerCase();
 
     // ======================================
-    // SECRET PASSWORD COMMAND
-    // DEVID ONLY
-    // ======================================
-
-    if (content === '-passreg') {
-
-        // Delete command message
-        await message.delete().catch(() => {});
-
-        if (message.author.id !== DEVID) {
-            return;
-        }
-
-        if (!panelConfigured()) {
-            return message.author.send(
-                '❌ Panel integration is not configured. Ask the bot owner to configure PANEL_URL and PANEL_SETUP_KEY.'
-            ).catch(() => {});
-        }
-
-        try {
-            await message.author.send({
-                embeds: [passwordManagerEmbed()],
-                components: [passwordManagerButtons()]
-            });
-
-            console.log('Password manager opened for DEVID.');
-
-        } catch {
-            console.log('Could not DM DEVID. They may have DMs disabled.');
-        }
-
-        return;
-    }
-
-    // ======================================
     // ER:LC PLAYER / STAFF COMMANDS
     // ======================================
 
@@ -794,19 +761,17 @@ client.on('messageCreate', async message => {
         content === '-erlc players' ||
         content === '-erlc staff'
     ) {
-        await message.delete().catch(() => {});
-
         const listType = content.endsWith('staff')
             ? 'staff'
             : 'players';
 
         try {
-            await sendERLCList(message.channel, listType);
+            await sendERLCList(message, listType);
 
         } catch (error) {
             console.error('ER:LC list command error:', error);
 
-            await message.channel.send({
+            await message.reply({
                 embeds: [
                     new EmbedBuilder()
                         .setColor(0xED4245)
