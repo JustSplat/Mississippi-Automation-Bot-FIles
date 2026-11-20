@@ -1,4 +1,3 @@
-
 const {
     Client,
     GatewayIntentBits,
@@ -32,9 +31,10 @@ const AUTO_MESSAGES = (process.env.AUTO_MESSAGES || '')
     .map(m => m.trim())
     .filter(Boolean);
 
-const AUTO_INTERVAL =
-    Math.max(1, Number(process.env.AUTO_MESSAGE_INTERVAL_MINUTES) || 10)
-    * 60000;
+const AUTO_INTERVAL = Math.max(
+    1,
+    Number(process.env.AUTO_MESSAGE_INTERVAL_MINUTES) || 10
+) * 60000;
 
 if (!TOKEN || !DEVID || !GUILD_ID) {
     console.error('Missing DISCORD_TOKEN, DEVID, or GUILD_ID.');
@@ -179,7 +179,7 @@ async function runERLCCommand(command) {
         throw new Error('ER:LC API key is not configured.');
     }
 
-    const cleanCommand = command.trim();
+    const cleanCommand = String(command).trim();
 
     if (
         !cleanCommand ||
@@ -216,6 +216,175 @@ async function runERLCCommand(command) {
     }
 
     return result;
+}
+
+// ==========================================
+// ER:LC PLAYER / STAFF DATA
+// ==========================================
+
+async function getERLCPlayers() {
+    if (!ERLC_API_KEY) {
+        throw new Error('ER:LC API key is not configured.');
+    }
+
+    const response = await fetch(
+        'https://api.erlc.gg/v2/server?Players=true',
+        {
+            headers: {
+                'server-key': ERLC_API_KEY
+            }
+        }
+    );
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        throw new Error(
+            data.message || `ER:LC API error (${response.status})`
+        );
+    }
+
+    const players = Array.isArray(data)
+        ? data
+        : data.Players;
+
+    if (!Array.isArray(players)) {
+        throw new Error('Unexpected ER:LC players response.');
+    }
+
+    return players;
+}
+
+function playerName(player) {
+    if (typeof player === 'string') return player;
+
+    return player?.Username ??
+        player?.username ??
+        player?.Player ??
+        player?.player ??
+        player?.Name ??
+        player?.name ??
+        'Unknown Player';
+}
+
+function playerPermission(player) {
+    return String(
+        player?.Permission ??
+        player?.permission ??
+        player?.PermissionLevel ??
+        player?.permission_level ??
+        'Normal'
+    ).trim();
+}
+
+function isStaffPlayer(player) {
+    const permission = playerPermission(player).toLowerCase();
+
+    return permission !== 'normal' &&
+        permission !== '' &&
+        permission !== 'unknown';
+}
+
+function staffLabel(permission) {
+    const p = String(permission).toLowerCase();
+
+    if (p.includes('owner')) return 'Owner';
+    if (p.includes('admin')) return 'Administrator';
+    if (p.includes('moderator') || p.includes('mod')) return 'Moderator';
+
+    return permission || 'Staff';
+}
+
+// ==========================================
+// ER:LC EMBEDS & PAGINATION
+// ==========================================
+
+const LIST_ITEMS_PER_PAGE = 10;
+
+function createListEmbed(listType, list, page) {
+    const totalPages = Math.max(
+        1,
+        Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
+    );
+
+    const safePage = Math.max(
+        0,
+        Math.min(page, totalPages - 1)
+    );
+
+    const start = safePage * LIST_ITEMS_PER_PAGE;
+
+    const items = list.slice(
+        start,
+        start + LIST_ITEMS_PER_PAGE
+    );
+
+    const isStaff = listType === 'staff';
+
+    const description = items.length
+        ? items.map((item, index) => {
+            const name = playerName(item);
+
+            if (isStaff) {
+                return `**${start + index + 1}.** ${name} — *${staffLabel(playerPermission(item))}*`;
+            }
+
+            return `**${start + index + 1}.** ${name}`;
+        }).join('\n')
+        : (
+            isStaff
+                ? 'No staff members are currently in-game.'
+                : 'Nobody is currently in-game.'
+        );
+
+    return new EmbedBuilder()
+        .setColor(isStaff ? 0xE74C3C : 0x5865F2)
+        .setTitle(`${isStaff ? 'Staff' : 'Players'} (${list.length})`)
+        .setDescription(description)
+        .setFooter({
+            text: `Page ${safePage + 1}/${totalPages} • Mississippi RP`
+        })
+        .setTimestamp();
+}
+
+function createListButtons(listType, page, totalPages) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`erlc_list:${listType}:${page - 1}`)
+            .setLabel('Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page <= 0),
+
+        new ButtonBuilder()
+            .setCustomId(`erlc_list:${listType}:${page + 1}`)
+            .setLabel('Next')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page >= totalPages - 1)
+    );
+}
+
+async function sendERLCList(channel, listType) {
+    const allPlayers = await getERLCPlayers();
+
+    const list = listType === 'staff'
+        ? allPlayers.filter(isStaffPlayer)
+        : allPlayers.filter(player => !isStaffPlayer(player));
+
+    const totalPages = Math.max(
+        1,
+        Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
+    );
+
+    const embed = createListEmbed(listType, list, 0);
+
+    const components = totalPages > 1
+        ? [createListButtons(listType, 0, totalPages)]
+        : [];
+
+    await channel.send({
+        embeds: [embed],
+        components
+    });
 }
 
 // ==========================================
@@ -315,7 +484,7 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// PLAYER COUNT
+// PLAYER COUNT / BOT PRESENCE
 // ==========================================
 
 async function updateERLCStatus() {
@@ -363,18 +532,81 @@ async function updateERLCStatus() {
 }
 
 // ==========================================
-// SLASH COMMAND HANDLER
+// INTERACTION HANDLER
 // ==========================================
 
 client.on('interactionCreate', async interaction => {
 
     // ======================================
-    // BUTTON HANDLER
+    // ER:LC PLAYER / STAFF PAGINATION
+    // ======================================
+
+    if (
+        interaction.isButton() &&
+        interaction.customId.startsWith('erlc_list:')
+    ) {
+        const [, listType, requestedPageRaw] =
+            interaction.customId.split(':');
+
+        if (!['players', 'staff'].includes(listType)) return;
+
+        const requestedPage = Number(requestedPageRaw);
+
+        if (
+            !Number.isInteger(requestedPage) ||
+            requestedPage < 0
+        ) {
+            return interaction.reply({
+                content: 'Invalid page.',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        try {
+            await interaction.deferUpdate();
+
+            const allPlayers = await getERLCPlayers();
+
+            const list = listType === 'staff'
+                ? allPlayers.filter(isStaffPlayer)
+                : allPlayers.filter(player => !isStaffPlayer(player));
+
+            const totalPages = Math.max(
+                1,
+                Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
+            );
+
+            const page = Math.min(
+                requestedPage,
+                totalPages - 1
+            );
+
+            await interaction.editReply({
+                embeds: [createListEmbed(listType, list, page)],
+                components: totalPages > 1
+                    ? [createListButtons(listType, page, totalPages)]
+                    : []
+            });
+
+        } catch (error) {
+            console.error('ER:LC list pagination error:', error);
+
+            await interaction.followUp({
+                content: 'Unable to refresh this list right now.',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        return;
+    }
+
+    // ======================================
+    // PASSWORD MANAGER BUTTONS
+    // DEVID ONLY
     // ======================================
 
     if (interaction.isButton()) {
 
-        // DEVID ONLY
         if (interaction.user.id !== DEVID) {
             return interaction.reply({
                 content: 'You are not authorized to use this panel.',
@@ -407,12 +639,12 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferReply({ ephemeral: true });
 
             try {
-                // Requires a matching endpoint on the website
                 await panelRequest('/api/delete-password');
 
                 return interaction.editReply(
                     '✅ Panel password deletion request completed.'
                 );
+
             } catch (error) {
                 return interaction.editReply(
                     `❌ Unable to delete password: ${error.message}`
@@ -426,6 +658,7 @@ client.on('interactionCreate', async interaction => {
     // ======================================
 
     if (interaction.isModalSubmit()) {
+
         if (interaction.user.id !== DEVID) {
             return interaction.reply({
                 content: 'You are not authorized.',
@@ -446,6 +679,7 @@ client.on('interactionCreate', async interaction => {
                 return interaction.editReply(
                     '✅ Your Mississippi RP Panel password has been registered successfully.'
                 );
+
             } catch (error) {
                 return interaction.editReply(
                     `❌ Password setup failed: ${error.message}`
@@ -518,7 +752,8 @@ client.on('messageCreate', async message => {
     const content = message.content.trim().toLowerCase();
 
     // ======================================
-    // SECRET PASSWORD COMMAND - DEVID ONLY
+    // SECRET PASSWORD COMMAND
+    // DEVID ONLY
     // ======================================
 
     if (content === '-passreg') {
@@ -537,14 +772,50 @@ client.on('messageCreate', async message => {
         }
 
         try {
-            const dm = await message.author.send({
+            await message.author.send({
                 embeds: [passwordManagerEmbed()],
                 components: [passwordManagerButtons()]
             });
 
             console.log('Password manager opened for DEVID.');
+
         } catch {
             console.log('Could not DM DEVID. They may have DMs disabled.');
+        }
+
+        return;
+    }
+
+    // ======================================
+    // ER:LC PLAYER / STAFF COMMANDS
+    // ======================================
+
+    if (
+        content === '-erlc players' ||
+        content === '-erlc staff'
+    ) {
+        await message.delete().catch(() => {});
+
+        const listType = content.endsWith('staff')
+            ? 'staff'
+            : 'players';
+
+        try {
+            await sendERLCList(message.channel, listType);
+
+        } catch (error) {
+            console.error('ER:LC list command error:', error);
+
+            await message.channel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setColor(0xED4245)
+                        .setTitle('ER:LC API Error')
+                        .setDescription(
+                            'Unable to retrieve the requested list right now.'
+                        )
+                ]
+            }).catch(() => {});
         }
 
         return;
