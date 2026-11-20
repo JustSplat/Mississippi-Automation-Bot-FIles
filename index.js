@@ -251,8 +251,9 @@ async function updateERLCStatus() {
         client.user.setActivity(playerCount, {
             type: ActivityType.Playing
         });
-
-        console.log(`ER:LC Players: ${playerCount}`);
+//--------------------------------------------------------------STATUS------------------------------------------------------
+        // DEF PLR COUNT TXT: ER:LC Players: ${playerCount}
+        console.log(`SPLAT IS FIXING ME! YAYA!`);
 
     } catch (error) {
         console.error('Player count error:', error.message);
