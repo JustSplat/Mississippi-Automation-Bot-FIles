@@ -253,7 +253,7 @@ async function updateERLCStatus() {
         });
 //--------------------------------------------------------------STATUS------------------------------------------------------
         // DEF PLR COUNT TXT: ER:LC Players: ${playerCount}
-        console.log(`SPLAT IS FIXING ME! YAYA!`);
+        console.log(`ER:LC Players: ${playerCount}`);
 
     } catch (error) {
         console.error('Player count error:', error.message);
