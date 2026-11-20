@@ -2,9 +2,16 @@
 const {
     Client,
     GatewayIntentBits,
+    Partials,
     ActivityType,
     EmbedBuilder,
-    SlashCommandBuilder
+    SlashCommandBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } = require('discord.js');
 
 // ==========================================
@@ -16,6 +23,9 @@ const DEVID = process.env.DEVID;
 const ERLC_API_KEY = process.env.ERLC_API_KEY;
 const INGAME_ROLE_ID = process.env.INGAME_ROLE_ID;
 const GUILD_ID = process.env.GUILD_ID;
+
+const PANEL_URL = (process.env.PANEL_URL || '').replace(/\/+$/, '');
+const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
 
 const AUTO_MESSAGES = (process.env.AUTO_MESSAGES || '')
     .split('|')
@@ -40,7 +50,8 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
-    ]
+    ],
+    partials: [Partials.Channel]
 });
 
 let autoMessageTimer = null;
@@ -60,6 +71,103 @@ async function hasAccess(interaction) {
     );
 
     return member.roles.cache.has(INGAME_ROLE_ID);
+}
+
+// ==========================================
+// PANEL API
+// ==========================================
+
+function panelConfigured() {
+    return Boolean(PANEL_URL && PANEL_SETUP_KEY);
+}
+
+async function panelRequest(endpoint, body = {}) {
+    if (!panelConfigured()) {
+        throw new Error('Panel API is not configured in environment variables.');
+    }
+
+    const response = await fetch(`${PANEL_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-bot-setup-key': PANEL_SETUP_KEY
+        },
+        body: JSON.stringify(body)
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        throw new Error(data.error || `Panel API error (${response.status})`);
+    }
+
+    return data;
+}
+
+// ==========================================
+// PASSWORD MANAGER UI
+// ==========================================
+
+function passwordManagerEmbed() {
+    return new EmbedBuilder()
+        .setColor(0x2563EB)
+        .setTitle('🔐 Mississippi RP Panel Password Manager')
+        .setDescription(
+            'Use the buttons below to manage your website panel password.\n\n' +
+            'This message is sent directly to you.'
+        )
+        .setFooter({ text: 'DEVID only • Mississippi RP' });
+}
+
+function passwordManagerButtons() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('passreg_set')
+            .setLabel('Set / Change Password')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('🔑'),
+
+        new ButtonBuilder()
+            .setCustomId('passreg_delete')
+            .setLabel('Delete Password')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('🗑️')
+    );
+}
+
+function passwordModal() {
+    const modal = new ModalBuilder()
+        .setCustomId('passreg_password_modal')
+        .setTitle('Set Panel Password');
+
+    const input = new TextInputBuilder()
+        .setCustomId('panel_password')
+        .setLabel('New panel password')
+        .setPlaceholder('Enter a new secure password')
+        .setStyle(TextInputStyle.Short)
+        .setMinLength(12)
+        .setMaxLength(128)
+        .setRequired(true);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(input)
+    );
+
+    return modal;
+}
+
+function deleteConfirmationButtons() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('passreg_delete_confirm')
+            .setLabel('Confirm Delete')
+            .setStyle(ButtonStyle.Danger),
+
+        new ButtonBuilder()
+            .setCustomId('passreg_delete_cancel')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Secondary)
+    );
 }
 
 // ==========================================
@@ -128,7 +236,7 @@ async function sendAutoMessage() {
             (autoMessageIndex + 1) % AUTO_MESSAGES.length;
 
     } catch (error) {
-        console.error('Auto message error:', error.message);
+        console.error('Automatic message error:', error.message);
     }
 }
 
@@ -190,12 +298,9 @@ client.once('ready', async () => {
     });
 
     try {
-        // Clear old global commands
         await client.application.commands.set([]);
 
-        // Replace all commands in this server
         const guild = await client.guilds.fetch(GUILD_ID);
-
         await guild.commands.set(commands);
 
         console.log('Slash commands successfully refreshed.');
@@ -204,7 +309,6 @@ client.once('ready', async () => {
     }
 
     updateERLCStatus();
-
     setInterval(updateERLCStatus, 60000);
 
     startAutoMessages();
@@ -245,14 +349,12 @@ async function updateERLCStatus() {
             throw new Error('Invalid player count response.');
         }
 
-        const playerCount =
-            `${data.CurrentPlayers} Players In-game`;
+        const playerCount = `${data.CurrentPlayers} Players In-game`;
 
         client.user.setActivity(playerCount, {
             type: ActivityType.Playing
         });
-//--------------------------------------------------------------STATUS------------------------------------------------------
-        // DEF PLR COUNT TXT: ER:LC Players: ${playerCount}
+
         console.log(`ER:LC Players: ${playerCount}`);
 
     } catch (error) {
@@ -265,6 +367,97 @@ async function updateERLCStatus() {
 // ==========================================
 
 client.on('interactionCreate', async interaction => {
+
+    // ======================================
+    // BUTTON HANDLER
+    // ======================================
+
+    if (interaction.isButton()) {
+
+        // DEVID ONLY
+        if (interaction.user.id !== DEVID) {
+            return interaction.reply({
+                content: 'You are not authorized to use this panel.',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        if (interaction.customId === 'passreg_set') {
+            return interaction.showModal(passwordModal());
+        }
+
+        if (interaction.customId === 'passreg_delete') {
+            return interaction.reply({
+                content:
+                    '⚠️ **Are you sure you want to delete the panel password?**\n' +
+                    'This may prevent access to the website until a new password is registered.',
+                components: [deleteConfirmationButtons()],
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId === 'passreg_delete_cancel') {
+            return interaction.update({
+                content: 'Password deletion cancelled.',
+                components: []
+            });
+        }
+
+        if (interaction.customId === 'passreg_delete_confirm') {
+            await interaction.deferReply({ ephemeral: true });
+
+            try {
+                // Requires a matching endpoint on the website
+                await panelRequest('/api/delete-password');
+
+                return interaction.editReply(
+                    '✅ Panel password deletion request completed.'
+                );
+            } catch (error) {
+                return interaction.editReply(
+                    `❌ Unable to delete password: ${error.message}`
+                );
+            }
+        }
+    }
+
+    // ======================================
+    // PASSWORD MODAL HANDLER
+    // ======================================
+
+    if (interaction.isModalSubmit()) {
+        if (interaction.user.id !== DEVID) {
+            return interaction.reply({
+                content: 'You are not authorized.',
+                ephemeral: true
+            });
+        }
+
+        if (interaction.customId === 'passreg_password_modal') {
+            await interaction.deferReply({ ephemeral: true });
+
+            const password = interaction.fields.getTextInputValue(
+                'panel_password'
+            );
+
+            try {
+                await panelRequest('/api/setup', { password });
+
+                return interaction.editReply(
+                    '✅ Your Mississippi RP Panel password has been registered successfully.'
+                );
+            } catch (error) {
+                return interaction.editReply(
+                    `❌ Password setup failed: ${error.message}`
+                );
+            }
+        }
+    }
+
+    // ======================================
+    // SLASH COMMAND HANDLER
+    // ======================================
+
     if (!interaction.isChatInputCommand()) return;
 
     const command = interaction.commandName;
@@ -283,7 +476,6 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'ingamecommand') {
             const input = interaction.options.getString('command');
-
             const result = await runERLCCommand(input);
 
             return interaction.editReply(
@@ -293,7 +485,6 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'announce') {
             const message = interaction.options.getString('message');
-
             const result = await runERLCCommand(`h ${message}`);
 
             return interaction.editReply(
@@ -318,13 +509,52 @@ client.on('interactionCreate', async interaction => {
 });
 
 // ==========================================
-// PUBLIC -PING
+// MESSAGE COMMANDS
 // ==========================================
 
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
-    if (message.content.trim().toLowerCase() !== '-ping') return;
+    const content = message.content.trim().toLowerCase();
+
+    // ======================================
+    // SECRET PASSWORD COMMAND - DEVID ONLY
+    // ======================================
+
+    if (content === '-passreg') {
+
+        // Delete command message
+        await message.delete().catch(() => {});
+
+        if (message.author.id !== DEVID) {
+            return;
+        }
+
+        if (!panelConfigured()) {
+            return message.author.send(
+                '❌ Panel integration is not configured. Ask the bot owner to configure PANEL_URL and PANEL_SETUP_KEY.'
+            ).catch(() => {});
+        }
+
+        try {
+            const dm = await message.author.send({
+                embeds: [passwordManagerEmbed()],
+                components: [passwordManagerButtons()]
+            });
+
+            console.log('Password manager opened for DEVID.');
+        } catch {
+            console.log('Could not DM DEVID. They may have DMs disabled.');
+        }
+
+        return;
+    }
+
+    // ======================================
+    // PUBLIC -PING
+    // ======================================
+
+    if (content !== '-ping') return;
 
     const embed = new EmbedBuilder()
         .setColor(0x5865F2)
