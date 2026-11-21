@@ -1,4 +1,3 @@
-
 const {
     Client,
     GatewayIntentBits,
@@ -11,8 +10,12 @@ const {
     ButtonStyle,
     ModalBuilder,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
+    AttachmentBuilder
 } = require('discord.js');
+
+const fs = require('node:fs');
+const path = require('node:path');
 
 // ==========================================
 // ENVIRONMENT
@@ -428,6 +431,88 @@ function startAutoMessages() {
 }
 
 // ==========================================
+// SESSION ANNOUNCEMENTS
+// ==========================================
+
+const SESSION_ROLE_ID = '1573525177298329692';
+const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
+
+function createSessionEmbed(action) {
+    const signoff = '\n\nSigned, JMRP Sessions Team.';
+
+    const details = {
+        start: {
+            title: 'SESSION START',
+            color: 0x2ECC71,
+            text:
+                'Jackson Mississippi Roleplay Session!\n\n' +
+                'JOIN CODE: hsrUV\n' +
+                'Server Name: Jackson Mississippi Role Play Strict VC Only\n' +
+                'Owner: nateplayzzs' +
+                signoff
+        },
+
+        low: {
+            title: 'SESSION LOW',
+            color: 0xF1C40F,
+            text:
+                'Session Low on Players! Join up to keep the session awake!\n\n' +
+                'JOIN CODE: hsrUV\n' +
+                'Server Name: Jackson Mississippi Role Play Strict VC Only\n' +
+                'Owner: nateplayzzs' +
+                signoff
+        },
+
+        vote: {
+            title: 'Session Vote',
+            color: 0x3498DB,
+            text:
+                'Session Vote in place! Vote to get us to start the session! Votes needed: 5\n' +
+                'If you voted you MUST join!' +
+                signoff
+        },
+
+        shutdown: {
+            title: 'Session Shutdown',
+            color: 0xE74C3C,
+            text:
+                'Session shutdown! Thanks for joining us for this session! Vote up our next session!' +
+                signoff
+        }
+    };
+
+    const selected = details[action];
+
+    if (!selected) {
+        throw new Error('Unknown session action.');
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(selected.color)
+        .setTitle(selected.title)
+        .setDescription(selected.text)
+        .setFooter({ text: 'JMRP Sessions Team' })
+        .setTimestamp();
+
+    const files = [];
+
+    if (fs.existsSync(SESSION_BANNER_PATH)) {
+        embed.setImage('attachment://SESSIONBANNER.png');
+
+        files.push(
+            new AttachmentBuilder(SESSION_BANNER_PATH, {
+                name: 'SESSIONBANNER.png'
+            })
+        );
+    }
+
+    return {
+        embeds: [embed],
+        files
+    };
+}
+
+// ==========================================
 // SLASH COMMANDS
 // ==========================================
 
@@ -450,6 +535,26 @@ const commands = [
                 .setDescription('Announcement message')
                 .setRequired(true)
                 .setMaxLength(120)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('session')
+        .setDescription('Post a JMRP session announcement')
+        .addSubcommand(sub =>
+            sub.setName('start')
+                .setDescription('Announce session start')
+        )
+        .addSubcommand(sub =>
+            sub.setName('shutdown')
+                .setDescription('Announce session shutdown')
+        )
+        .addSubcommand(sub =>
+            sub.setName('vote')
+                .setDescription('Post a session vote')
+        )
+        .addSubcommand(sub =>
+            sub.setName('low')
+                .setDescription('Announce low session population')
         )
 ].map(command => command.toJSON());
 
@@ -461,7 +566,7 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
     client.user.setPresence({
-        status: 'dnd',
+        status: 'online',
         activities: [{
             name: 'WAITING ER:LC API KEY 🗝️',
             type: ActivityType.Playing
@@ -472,9 +577,11 @@ client.once('ready', async () => {
         await client.application.commands.set([]);
 
         const guild = await client.guilds.fetch(GUILD_ID);
+
         await guild.commands.set(commands);
 
         console.log('Slash commands successfully refreshed.');
+
     } catch (error) {
         console.error('Command refresh failed:', error);
     }
@@ -698,9 +805,33 @@ client.on('interactionCreate', async interaction => {
 
     const command = interaction.commandName;
 
-    if (!['ingamecommand', 'announce'].includes(command)) return;
+    if (!['ingamecommand', 'announce', 'session'].includes(command)) return;
 
     try {
+
+        // SESSION COMMANDS
+        if (command === 'session') {
+
+            const member = await interaction.guild.members.fetch(
+                interaction.user.id
+            );
+
+            if (!member.roles.cache.has(SESSION_ROLE_ID)) {
+                return interaction.reply({
+                    content: 'You do not have permission to use /session.',
+                    ephemeral: true
+                });
+            }
+
+            const action = interaction.options.getSubcommand(true);
+
+            return interaction.reply({
+                ...createSessionEmbed(action),
+                allowedMentions: { parse: [] }
+            });
+        }
+
+        // OTHER COMMAND PERMISSIONS
         if (!await hasAccess(interaction)) {
             return interaction.reply({
                 content: 'You do not have permission to use this command.',
@@ -712,6 +843,7 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'ingamecommand') {
             const input = interaction.options.getString('command');
+
             const result = await runERLCCommand(input);
 
             return interaction.editReply(
@@ -721,6 +853,7 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'announce') {
             const message = interaction.options.getString('message');
+
             const result = await runERLCCommand(`h ${message}`);
 
             return interaction.editReply(
