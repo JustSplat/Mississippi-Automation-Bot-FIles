@@ -461,7 +461,7 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
     client.user.setPresence({
-        status: 'online',
+        status: 'dnd',
         activities: [{
             name: 'WAITING ER:LC API KEY 🗝️',
             type: ActivityType.Playing
