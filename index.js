@@ -87,7 +87,7 @@ function panelConfigured() {
 
 async function panelRequest(endpoint, body = {}) {
     if (!panelConfigured()) {
-        throw new Error('Panel API is not configured in environment variables.');
+        throw new Error('Panel API is not configured.');
     }
 
     const response = await fetch(`${PANEL_URL}${endpoint}`, {
@@ -109,7 +109,7 @@ async function panelRequest(endpoint, body = {}) {
 }
 
 // ==========================================
-// PASSWORD MANAGER UI
+// PASSWORD MANAGER
 // ==========================================
 
 function passwordManagerEmbed() {
@@ -175,7 +175,7 @@ function deleteConfirmationButtons() {
 }
 
 // ==========================================
-// ER:LC API COMMAND
+// ER:LC COMMAND API
 // ==========================================
 
 async function runERLCCommand(command) {
@@ -215,7 +215,7 @@ async function runERLCCommand(command) {
 
     if (!response.ok || result.success === false) {
         throw new Error(
-            result.message || `ER:LC API error: ${response.status}`
+            result.message || `ER:LC API error (${response.status})`
         );
     }
 
@@ -223,7 +223,7 @@ async function runERLCCommand(command) {
 }
 
 // ==========================================
-// ER:LC PLAYER / STAFF DATA
+// ER:LC PLAYERS / STAFF
 // ==========================================
 
 async function getERLCPlayers() {
@@ -300,7 +300,7 @@ function staffLabel(permission) {
 }
 
 // ==========================================
-// ER:LC EMBEDS & PAGINATION
+// ER:LC LISTS / PAGINATION
 // ==========================================
 
 const LIST_ITEMS_PER_PAGE = 10;
@@ -317,12 +317,7 @@ function createListEmbed(listType, list, page) {
     );
 
     const start = safePage * LIST_ITEMS_PER_PAGE;
-
-    const items = list.slice(
-        start,
-        start + LIST_ITEMS_PER_PAGE
-    );
-
+    const items = list.slice(start, start + LIST_ITEMS_PER_PAGE);
     const isStaff = listType === 'staff';
 
     const description = items.length
@@ -379,21 +374,17 @@ async function sendERLCList(message, listType) {
         Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
     );
 
-    const embed = createListEmbed(listType, list, 0);
-
-    const components = totalPages > 1
-        ? [createListButtons(listType, 0, totalPages)]
-        : [];
-
     await message.reply({
-        embeds: [embed],
-        components,
+        embeds: [createListEmbed(listType, list, 0)],
+        components: totalPages > 1
+            ? [createListButtons(listType, 0, totalPages)]
+            : [],
         allowedMentions: { repliedUser: false }
     });
 }
 
 // ==========================================
-// AUTOMATIC ANNOUNCEMENTS
+// AUTO ANNOUNCEMENTS
 // ==========================================
 
 async function sendAutoMessage() {
@@ -431,49 +422,54 @@ function startAutoMessages() {
 }
 
 // ==========================================
-// SESSION ANNOUNCEMENTS
+// SESSION SYSTEM
 // ==========================================
 
 const SESSION_ROLE_ID = '1573525177298329692';
 const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
+const SESSION_VOTES_REQUIRED = 5;
 
-function createSessionEmbed(action) {
-    const signoff = '\n\nSigned, JMRP Sessions Team.';
+let activeSessionVote = null;
+
+function sessionServerLine() {
+    return '||**JOIN CODE:** hsrUV  •  **SERVER:** Jackson Mississippi Role Play Strict VC Only  •  **OWNER:** nateplayzzs||';
+}
+
+function createSessionEmbed(action, voteCount = 0) {
+    const signoff = '\n\n*Signed, JMRP Sessions Team.*';
 
     const details = {
         start: {
-            title: 'SESSION START',
+            title: '🟢 SESSION START',
             color: 0x2ECC71,
             text:
                 'Jackson Mississippi Roleplay Session!\n\n' +
-                'JOIN CODE: hsrUV\n' +
-                'Server Name: Jackson Mississippi Role Play Strict VC Only\n' +
-                'Owner: nateplayzzs' +
+                sessionServerLine() +
                 signoff
         },
 
         low: {
-            title: 'SESSION LOW',
+            title: '🟡 SESSION LOW',
             color: 0xF1C40F,
             text:
                 'Session Low on Players! Join up to keep the session awake!\n\n' +
-                'JOIN CODE: hsrUV\n' +
-                'Server Name: Jackson Mississippi Role Play Strict VC Only\n' +
-                'Owner: nateplayzzs' +
+                sessionServerLine() +
                 signoff
         },
 
         vote: {
-            title: 'Session Vote',
+            title: '🗳️ SESSION VOTE',
             color: 0x3498DB,
             text:
-                'Session Vote in place! Vote to get us to start the session! Votes needed: 5\n' +
-                'If you voted you MUST join!' +
+                'Session Vote in place! Vote to get us to start the session!\n' +
+                '**Votes needed: 5. If you voted, you MUST join!**\n\n' +
+                `**Votes: ${voteCount}/${SESSION_VOTES_REQUIRED}**\n\n` +
+                sessionServerLine() +
                 signoff
         },
 
         shutdown: {
-            title: 'Session Shutdown',
+            title: '🔴 SESSION SHUTDOWN',
             color: 0xE74C3C,
             text:
                 'Session shutdown! Thanks for joining us for this session! Vote up our next session!' +
@@ -510,6 +506,17 @@ function createSessionEmbed(action) {
         embeds: [embed],
         files
     };
+}
+
+function sessionVoteButtonRow(voteCount, disabled = false) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('jmrp_session_vote_button')
+            .setLabel(`Vote (${voteCount})`)
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('🗳️')
+            .setDisabled(disabled)
+    );
 }
 
 // ==========================================
@@ -593,7 +600,7 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// PLAYER COUNT / BOT PRESENCE
+// ER:LC BOT PRESENCE
 // ==========================================
 
 async function updateERLCStatus() {
@@ -647,6 +654,66 @@ async function updateERLCStatus() {
 client.on('interactionCreate', async interaction => {
 
     // ======================================
+    // SESSION VOTE BUTTON
+    // ======================================
+
+    if (
+        interaction.isButton() &&
+        interaction.customId === 'jmrp_session_vote_button'
+    ) {
+        const vote = activeSessionVote;
+
+        if (
+            !vote ||
+            !vote.active ||
+            vote.messageId !== interaction.message.id
+        ) {
+            return interaction.reply({
+                content: 'This session vote is no longer active.',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        if (vote.voters.has(interaction.user.id)) {
+            return interaction.reply({
+                content: 'You have already voted!',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        vote.voters.add(interaction.user.id);
+
+        const count = vote.voters.size;
+
+        // FIVE VOTES = START SESSION
+        if (count >= SESSION_VOTES_REQUIRED) {
+            vote.active = false;
+
+            await interaction.update({
+                embeds: createSessionEmbed('vote', count).embeds,
+                components: [sessionVoteButtonRow(count, true)]
+            });
+
+            const channel = await client.channels.fetch(vote.channelId);
+
+            if (channel && channel.isTextBased()) {
+                await channel.send({
+                    ...createSessionEmbed('start'),
+                    allowedMentions: { parse: [] }
+                });
+            }
+
+            return;
+        }
+
+        // UPDATE VOTE COUNT
+        return interaction.update({
+            embeds: createSessionEmbed('vote', count).embeds,
+            components: [sessionVoteButtonRow(count)]
+        });
+    }
+
+    // ======================================
     // ER:LC PLAYER / STAFF PAGINATION
     // ======================================
 
@@ -685,10 +752,7 @@ client.on('interactionCreate', async interaction => {
                 Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
             );
 
-            const page = Math.min(
-                requestedPage,
-                totalPages - 1
-            );
+            const page = Math.min(requestedPage, totalPages - 1);
 
             await interaction.editReply({
                 embeds: [createListEmbed(listType, list, page)],
@@ -711,7 +775,6 @@ client.on('interactionCreate', async interaction => {
 
     // ======================================
     // PASSWORD MANAGER BUTTONS
-    // DEVID ONLY
     // ======================================
 
     if (interaction.isButton()) {
@@ -763,7 +826,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // ======================================
-    // PASSWORD MODAL HANDLER
+    // PASSWORD MODAL
     // ======================================
 
     if (interaction.isModalSubmit()) {
@@ -798,14 +861,16 @@ client.on('interactionCreate', async interaction => {
     }
 
     // ======================================
-    // SLASH COMMAND HANDLER
+    // SLASH COMMANDS
     // ======================================
 
     if (!interaction.isChatInputCommand()) return;
 
     const command = interaction.commandName;
 
-    if (!['ingamecommand', 'announce', 'session'].includes(command)) return;
+    if (!['ingamecommand', 'announce', 'session'].includes(command)) {
+        return;
+    }
 
     try {
 
@@ -825,9 +890,53 @@ client.on('interactionCreate', async interaction => {
 
             const action = interaction.options.getSubcommand(true);
 
-            return interaction.reply({
+            // START SESSION VOTE
+            if (action === 'vote') {
+
+                if (activeSessionVote && activeSessionVote.active) {
+                    return interaction.reply({
+                        content: 'A session vote is already active!',
+                        ephemeral: true
+                    });
+                }
+
+                activeSessionVote = {
+                    channelId: interaction.channelId,
+                    messageId: null,
+                    voters: new Set(),
+                    active: true
+                };
+
+                const votePayload = createSessionEmbed('vote', 0);
+
+                votePayload.components = [
+                    sessionVoteButtonRow(0)
+                ];
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const voteMessage = await interaction.channel.send({
+                    ...votePayload,
+                    allowedMentions: { parse: [] }
+                });
+
+                activeSessionVote.messageId = voteMessage.id;
+
+                return interaction.editReply({
+                    content: 'Session vote posted.'
+                });
+            }
+
+            // OTHER SESSION COMMANDS
+            await interaction.deferReply({ ephemeral: true });
+
+            await interaction.channel.send({
                 ...createSessionEmbed(action),
                 allowedMentions: { parse: [] }
+            });
+
+            return interaction.editReply({
+                content: 'Session announcement sent.'
             });
         }
 
@@ -843,7 +952,6 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'ingamecommand') {
             const input = interaction.options.getString('command');
-
             const result = await runERLCCommand(input);
 
             return interaction.editReply(
@@ -853,7 +961,6 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'announce') {
             const message = interaction.options.getString('message');
-
             const result = await runERLCCommand(`h ${message}`);
 
             return interaction.editReply(
@@ -887,7 +994,7 @@ client.on('messageCreate', async message => {
     const content = message.content.trim().toLowerCase();
 
     // ======================================
-    // ER:LC PLAYER / STAFF COMMANDS
+    // ER:LC PLAYER / STAFF
     // ======================================
 
     if (
@@ -920,7 +1027,7 @@ client.on('messageCreate', async message => {
     }
 
     // ======================================
-    // PUBLIC -PING
+    // -PING
     // ======================================
 
     if (content !== '-ping') return;
