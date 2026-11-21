@@ -88,7 +88,6 @@ const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
 
 const VOTES_REQUIRED = 5;
 
-// Each vote message has its own voting data
 const sessionVotes = new Map();
 
 // ==========================================
@@ -387,6 +386,64 @@ async function sendERLCList(message, listType) {
 }
 
 // ==========================================
+// PROMOTIONS & INFRACTIONS
+// ==========================================
+
+function createPromotionEmbed(user, newRank, reason, promotedBy) {
+    return new EmbedBuilder()
+        .setColor(0x6B2C5B)
+        .addFields(
+            {
+                name: '🪪 Staff Member:',
+                value: `${user}`,
+                inline: false
+            },
+            {
+                name: '📋 Promotion:',
+                value: `**${newRank}**`,
+                inline: false
+            },
+            {
+                name: '📌 Reason:',
+                value: reason,
+                inline: false
+            }
+        )
+        .setFooter({
+            text: `${promotedBy.username}`,
+            iconURL: promotedBy.displayAvatarURL()
+        })
+        .setTimestamp();
+}
+
+function createInfractionEmbed(user, type, reason, issuedBy) {
+    return new EmbedBuilder()
+        .setColor(0xA83232)
+        .addFields(
+            {
+                name: '🪪 Staff Member:',
+                value: `${user}`,
+                inline: false
+            },
+            {
+                name: '⚠️ Infraction:',
+                value: `**${type}**`,
+                inline: false
+            },
+            {
+                name: '📌 Reason:',
+                value: reason,
+                inline: false
+            }
+        )
+        .setFooter({
+            text: `${issuedBy.username}`,
+            iconURL: issuedBy.displayAvatarURL()
+        })
+        .setTimestamp();
+}
+
+// ==========================================
 // AUTO ANNOUNCEMENTS
 // ==========================================
 
@@ -437,7 +494,6 @@ function createSessionEmbed(action, voteCount = 0) {
 
     const signoff = '*Signed, JMRP Sessions Team.*';
 
-    // NO BLANK LINES BETWEEN TEXT
     const details = {
         start: {
             title: '🟢 SESSION START UP',
@@ -446,7 +502,7 @@ function createSessionEmbed(action, voteCount = 0) {
                 'SESSION START UP!\n' +
                 'Jackson Mississippi Roleplay Session!\n\n' +
                 joinInfo + '\n' +
-            signoff
+                signoff
         },
 
         low: {
@@ -454,7 +510,7 @@ function createSessionEmbed(action, voteCount = 0) {
             color: 0xF1C40F,
             text:
                 'Session Low on Players!\n' +
-            'Join up to keep the session awake!\n\n' +
+                'Join up to keep the session awake!\n\n' +
             joinInfo + '\n' +
             signoff
         },
@@ -464,7 +520,7 @@ function createSessionEmbed(action, voteCount = 0) {
             color: 0x3498DB,
             text:
                 'Session Vote in place!\n' +
-            'Vote to get us to start the session!\n' +
+                'Vote to get us to start the session!\n' +
             `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
             'If you voted you MUST join!\n\n' +
             joinInfo + '\n' +
@@ -568,6 +624,48 @@ const commands = [
         ),
 
     new SlashCommandBuilder()
+        .setName('promote')
+        .setDescription('Promote a staff member')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('Staff member being promoted')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('newrank')
+                .setDescription('New staff rank')
+                .setRequired(true)
+                .setMaxLength(100)
+        )
+        .addStringOption(option =>
+            option.setName('reason')
+                .setDescription('Reason for promotion')
+                .setRequired(true)
+                .setMaxLength(1000)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('infraction')
+        .setDescription('Record a staff infraction')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('Staff member receiving the infraction')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('type')
+                .setDescription('Infraction type')
+                .setRequired(true)
+                .setMaxLength(100)
+        )
+        .addStringOption(option =>
+            option.setName('reason')
+                .setDescription('Reason for infraction')
+                .setRequired(true)
+                .setMaxLength(1000)
+        ),
+
+    new SlashCommandBuilder()
         .setName('session')
         .setDescription('Post a JMRP session announcement')
         .addSubcommand(sub =>
@@ -595,7 +693,6 @@ const commands = [
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
-    // DND permanently
     client.user.setPresence({
         status: 'dnd',
         activities: [{
@@ -616,7 +713,6 @@ client.once('ready', async () => {
         console.error('Command refresh failed:', error);
     }
 
-    // Start rotating status
     rotateStatus();
     setInterval(rotateStatus, STATUS_ROTATION_INTERVAL);
 
@@ -736,7 +832,6 @@ client.on('interactionCreate', async interaction => {
                 ]
             });
 
-            // Automatically post SESSION START when 5 votes are reached
             await sendSessionAnnouncement(interaction.channel, 'start');
 
             await interaction.followUp({
@@ -922,9 +1017,66 @@ client.on('interactionCreate', async interaction => {
 
     const command = interaction.commandName;
 
-    if (!['ingamecommand', 'announce', 'session'].includes(command)) return;
+    if (
+        ![
+            'ingamecommand',
+            'announce',
+            'session',
+            'promote',
+            'infraction'
+        ].includes(command)
+    ) return;
 
     try {
+
+        // ==================================
+        // PROMOTION / INFRACTION COMMANDS
+        // ==================================
+
+        if (command === 'promote' || command === 'infraction') {
+
+            if (!await hasAccess(interaction)) {
+                return interaction.reply({
+                    content: 'You do not have permission to use this command.',
+                    ephemeral: true
+                });
+            }
+
+            const targetUser = interaction.options.getUser('user');
+            const reason = interaction.options.getString('reason');
+
+            await interaction.deferReply();
+
+            if (command === 'promote') {
+                const newRank = interaction.options.getString('newrank');
+
+                const embed = createPromotionEmbed(
+                    targetUser,
+                    newRank,
+                    reason,
+                    interaction.user
+                );
+
+                return interaction.editReply({
+                    embeds: [embed]
+                });
+            }
+
+            if (command === 'infraction') {
+                const type = interaction.options.getString('type');
+
+                const embed = createInfractionEmbed(
+                    targetUser,
+                    type,
+                    reason,
+                    interaction.user
+                );
+
+                return interaction.editReply({
+                    embeds: [embed]
+                });
+            }
+        }
 
         // ==================================
         // SESSION COMMANDS
