@@ -18,6 +18,10 @@ const {
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { setupTickets } = require('./tickets');
+
+setupTickets(client);
+
 // ==========================================
 // ENVIRONMENT
 // ==========================================
