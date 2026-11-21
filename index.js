@@ -37,7 +37,7 @@ const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
 
 const ROTATING_STATUSES = [
     'ER:LC Players',
-    'Players In-Game'
+    'JMRP IS DA BEST 👀'
 ];
 
 let statusIndex = 0;
