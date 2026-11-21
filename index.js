@@ -425,7 +425,7 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🟢 SESSION START',
             color: 0x2ECC71,
             text:
-                'SESSION START: Jackson Mississippi Roleplay Session!\n' +
+                'SESSION START: Jackson Mississippi Roleplay Session!\n\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -434,7 +434,7 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🟡 SESSION LOW',
             color: 0xF1C40F,
             text:
-                'Session Low on Players! Join up to keep the session awake!\n' +
+                'Session Low on Players! Join up to keep the session awake!\n\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -445,7 +445,7 @@ function createSessionEmbed(action, voteCount = 0) {
             text:
                 'Session Vote in place! Vote to get us to start the session!\n' +
                 `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
-                'If you voted you MUST join!\n' +
+                'If you voted you MUST join!\n\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -456,7 +456,7 @@ function createSessionEmbed(action, voteCount = 0) {
             text:
                 'Session Shutdown!\n' +
                 'Thanks for joining us for this session!\n' +
-                'Vote up our next session!\n' +
+                'Vote up our next session!\n\n' +
                 joinInfo + '\n' +
                 signoff
         }
