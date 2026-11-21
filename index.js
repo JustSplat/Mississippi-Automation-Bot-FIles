@@ -422,10 +422,11 @@ function createSessionEmbed(action, voteCount = 0) {
     // NO BLANK LINES BETWEEN TEXT
     const details = {
         start: {
-            title: '🟢 SESSION START',
+            title: '🟢 SESSION START UP',
             color: 0x2ECC71,
             text:
-                'SESSION START: Jackson Mississippi Roleplay Session!\n\n' +
+                'SESSION START UP!\n' +
+                'Jackson Mississippi Roleplay Session!\n\n' +
                 joinInfo + '\n' +
                 signoff
         },
