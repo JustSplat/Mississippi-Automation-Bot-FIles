@@ -1,3 +1,4 @@
+
 const {
     Client,
     GatewayIntentBits,
@@ -26,10 +27,22 @@ const DEVID = process.env.DEVID;
 const ERLC_API_KEY = process.env.ERLC_API_KEY;
 const INGAME_ROLE_ID = process.env.INGAME_ROLE_ID;
 const GUILD_ID = process.env.GUILD_ID;
+
 const SESSION_PING_ROLE_ID = '1567075807619448860';
+const SESSION_ROLE_ID = '1573525177298329692';
+
+// Promotions / Infractions permissions
+const PROMO_INFRACTION_ROLE_ID = '1573769800872632492';
 
 const PANEL_URL = (process.env.PANEL_URL || '').replace(/\/+$/, '');
 const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
+
+// ==========================================
+// FILES
+// ==========================================
+
+const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
+const PROMO_BANNER_PATH = path.join(__dirname, 'PROMOBANNER.png');
 
 // ==========================================
 // STATUS ROTATIONS
@@ -41,7 +54,6 @@ const ROTATING_STATUSES = [
 ];
 
 let statusIndex = 0;
-
 const STATUS_ROTATION_INTERVAL = 15000;
 
 // ==========================================
@@ -83,11 +95,7 @@ let autoMessageIndex = 0;
 // SESSION VOTING
 // ==========================================
 
-const SESSION_ROLE_ID = '1573525177298329692';
-const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
-
 const VOTES_REQUIRED = 5;
-
 const sessionVotes = new Map();
 
 // ==========================================
@@ -104,6 +112,18 @@ async function hasAccess(interaction) {
     );
 
     return member.roles.cache.has(INGAME_ROLE_ID);
+}
+
+// Promotions and infractions have their own role restriction.
+// DEVID and the in-game role do NOT bypass this check.
+async function hasPromoInfractionAccess(interaction) {
+    if (!interaction.guild) return false;
+
+    const member = await interaction.guild.members.fetch(
+        interaction.user.id
+    );
+
+    return member.roles.cache.has(PROMO_INFRACTION_ROLE_ID);
 }
 
 // ==========================================
@@ -390,7 +410,7 @@ async function sendERLCList(message, listType) {
 // ==========================================
 
 function createPromotionEmbed(user, newRank, reason, promotedBy) {
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(0x6B2C5B)
         .addFields(
             {
@@ -414,10 +434,16 @@ function createPromotionEmbed(user, newRank, reason, promotedBy) {
             iconURL: promotedBy.displayAvatarURL()
         })
         .setTimestamp();
+
+    if (fs.existsSync(PROMO_BANNER_PATH)) {
+        embed.setImage('attachment://PROMOBANNER.png');
+    }
+
+    return embed;
 }
 
 function createInfractionEmbed(user, type, reason, issuedBy) {
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(0xA83232)
         .addFields(
             {
@@ -441,6 +467,25 @@ function createInfractionEmbed(user, type, reason, issuedBy) {
             iconURL: issuedBy.displayAvatarURL()
         })
         .setTimestamp();
+
+    if (fs.existsSync(PROMO_BANNER_PATH)) {
+        embed.setImage('attachment://PROMOBANNER.png');
+    }
+
+    return embed;
+}
+
+function getPromoBannerFiles() {
+    if (!fs.existsSync(PROMO_BANNER_PATH)) {
+        console.warn('PROMOBANNER.png not found. Sending embed without banner.');
+        return [];
+    }
+
+    return [
+        new AttachmentBuilder(PROMO_BANNER_PATH, {
+            name: 'PROMOBANNER.png'
+        })
+    ];
 }
 
 // ==========================================
@@ -486,11 +531,10 @@ function startAutoMessages() {
 // ==========================================
 
 function createSessionEmbed(action, voteCount = 0) {
-
     const joinInfo =
         '`JOIN CODE: hsrUV`\n' +
         '`SERVER: Jackson Mississippi Role Play Strict VC Only`\n' +
-        '`OWNER: nateplayzzs`';
+        '`OWNER: nateplayzz`';
 
     const signoff = '*Signed, JMRP Sessions Team.*';
 
@@ -511,8 +555,8 @@ function createSessionEmbed(action, voteCount = 0) {
             text:
                 'Session Low on Players!\n' +
                 'Join up to keep the session awake!\n\n' +
-            joinInfo + '\n' +
-            signoff
+                joinInfo + '\n' +
+                signoff
         },
 
         vote: {
@@ -1035,9 +1079,9 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'promote' || command === 'infraction') {
 
-            if (!await hasAccess(interaction)) {
+            if (!await hasPromoInfractionAccess(interaction)) {
                 return interaction.reply({
-                    content: 'You do not have permission to use this command.',
+                    content: 'You need the authorized Promotions/Infractions role to use this command.',
                     ephemeral: true
                 });
             }
@@ -1058,7 +1102,8 @@ client.on('interactionCreate', async interaction => {
                 );
 
                 return interaction.editReply({
-                    embeds: [embed]
+                    embeds: [embed],
+                    files: getPromoBannerFiles()
                 });
             }
 
@@ -1073,7 +1118,8 @@ client.on('interactionCreate', async interaction => {
                 );
 
                 return interaction.editReply({
-                    embeds: [embed]
+                    embeds: [embed],
+                    files: getPromoBannerFiles()
                 });
             }
         }
@@ -1097,7 +1143,6 @@ client.on('interactionCreate', async interaction => {
 
             const action = interaction.options.getSubcommand(true);
 
-            // SESSION VOTE
             if (action === 'vote') {
                 await interaction.deferReply({ ephemeral: true });
 
@@ -1124,7 +1169,6 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
-            // START / SHUTDOWN / LOW
             await interaction.deferReply({ ephemeral: true });
 
             await sendSessionAnnouncement(interaction.channel, action);
