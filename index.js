@@ -5,6 +5,7 @@ const {
     ActivityType,
     EmbedBuilder,
     SlashCommandBuilder,
+    AttachmentBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -12,8 +13,12 @@ const {
     TextInputBuilder,
     TextInputStyle,
     StringSelectMenuBuilder,
+    ChannelType,
     PermissionFlagsBits
 } = require('discord.js');
+
+const fs = require('node:fs');
+const path = require('node:path');
 
 // ==========================================
 // ENVIRONMENT
@@ -25,8 +30,39 @@ const ERLC_API_KEY = process.env.ERLC_API_KEY;
 const INGAME_ROLE_ID = process.env.INGAME_ROLE_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
+const SESSION_PING_ROLE_ID = '1567075807619448860';
+const SESSION_ROLE_ID = '1573525177298329692';
+
 const PANEL_URL = (process.env.PANEL_URL || '').replace(/\/+$/, '');
 const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
+
+const GENERAL_TICKET_CATEGORY = '1567704667884888084';
+const HIGH_RANK_TICKET_CATEGORY = '1573776599512518716';
+const TICKET_PING_ROLE_ID = '1567075807829164127';
+const TICKET_STAFF_ROLE_ID = process.env.TICKET_STAFF_ROLE_ID;
+
+// ==========================================
+// FILES
+// ==========================================
+
+const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
+const PROMO_BANNER_PATH = path.join(__dirname, 'PROMOBANNER.png');
+
+// ==========================================
+// STATUS ROTATION
+// ==========================================
+
+const ROTATING_STATUSES = [
+    'ER:LC Players',
+    'JMRP IS DA BEST 👀'
+];
+
+let statusIndex = 0;
+const STATUS_ROTATION_INTERVAL = 15000;
+
+// ==========================================
+// AUTO MESSAGES
+// ==========================================
 
 const AUTO_MESSAGES = (process.env.AUTO_MESSAGES || '')
     .split('|')
@@ -60,19 +96,29 @@ let autoMessageTimer = null;
 let autoMessageIndex = 0;
 
 // ==========================================
+// SESSION VOTING
+// ==========================================
+
+const VOTES_REQUIRED = 5;
+const sessionVotes = new Map();
+
+// ==========================================
 // PERMISSIONS
 // ==========================================
 
 async function hasAccess(interaction) {
     if (interaction.user.id === DEVID) return true;
-
     if (!INGAME_ROLE_ID || !interaction.guild) return false;
 
-    const member = await interaction.guild.members.fetch(
-        interaction.user.id
-    );
-
+    const member = await interaction.guild.members.fetch(interaction.user.id);
     return member.roles.cache.has(INGAME_ROLE_ID);
+}
+
+function hasTicketStaff(member) {
+    return Boolean(
+        TICKET_STAFF_ROLE_ID &&
+        member?.roles?.cache?.has(TICKET_STAFF_ROLE_ID)
+    );
 }
 
 // ==========================================
@@ -85,7 +131,7 @@ function panelConfigured() {
 
 async function panelRequest(endpoint, body = {}) {
     if (!panelConfigured()) {
-        throw new Error('Panel API is not configured in environment variables.');
+        throw new Error('Panel API is not configured.');
     }
 
     const response = await fetch(`${PANEL_URL}${endpoint}`, {
@@ -107,35 +153,8 @@ async function panelRequest(endpoint, body = {}) {
 }
 
 // ==========================================
-// PASSWORD MANAGER UI
+// PASSWORD MANAGER
 // ==========================================
-
-function passwordManagerEmbed() {
-    return new EmbedBuilder()
-        .setColor(0x2563EB)
-        .setTitle('🔐 Mississippi RP Panel Password Manager')
-        .setDescription(
-            'Use the buttons below to manage your website panel password.\n\n' +
-            'This message is sent directly to you.'
-        )
-        .setFooter({ text: 'DEVID only • Mississippi RP' });
-}
-
-function passwordManagerButtons() {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('passreg_set')
-            .setLabel('Set / Change Password')
-            .setStyle(ButtonStyle.Primary)
-            .setEmoji('🔑'),
-
-        new ButtonBuilder()
-            .setCustomId('passreg_delete')
-            .setLabel('Delete Password')
-            .setStyle(ButtonStyle.Danger)
-            .setEmoji('🗑️')
-    );
-}
 
 function passwordModal() {
     const modal = new ModalBuilder()
@@ -151,10 +170,7 @@ function passwordModal() {
         .setMaxLength(128)
         .setRequired(true);
 
-    modal.addComponents(
-        new ActionRowBuilder().addComponents(input)
-    );
-
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
     return modal;
 }
 
@@ -164,7 +180,6 @@ function deleteConfirmationButtons() {
             .setCustomId('passreg_delete_confirm')
             .setLabel('Confirm Delete')
             .setStyle(ButtonStyle.Danger),
-
         new ButtonBuilder()
             .setCustomId('passreg_delete_cancel')
             .setLabel('Cancel')
@@ -173,7 +188,7 @@ function deleteConfirmationButtons() {
 }
 
 // ==========================================
-// ER:LC API COMMAND
+// ER:LC COMMAND API
 // ==========================================
 
 async function runERLCCommand(command) {
@@ -183,11 +198,7 @@ async function runERLCCommand(command) {
 
     const cleanCommand = String(command).trim();
 
-    if (
-        !cleanCommand ||
-        cleanCommand.length > 120 ||
-        /[\r\n]/.test(cleanCommand)
-    ) {
+    if (!cleanCommand || cleanCommand.length > 120 || /[\r\n]/.test(cleanCommand)) {
         throw new Error('Invalid command.');
     }
 
@@ -195,33 +206,26 @@ async function runERLCCommand(command) {
         ? cleanCommand
         : `:${cleanCommand}`;
 
-    const response = await fetch(
-        'https://api.erlc.gg/v2/server/command',
-        {
-            method: 'POST',
-            headers: {
-                'server-key': ERLC_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                command: finalCommand
-            })
-        }
-    );
+    const response = await fetch('https://api.erlc.gg/v2/server/command', {
+        method: 'POST',
+        headers: {
+            'server-key': ERLC_API_KEY,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ command: finalCommand })
+    });
 
     const result = await response.json().catch(() => ({}));
 
     if (!response.ok || result.success === false) {
-        throw new Error(
-            result.message || `ER:LC API error: ${response.status}`
-        );
+        throw new Error(result.message || `ER:LC API error (${response.status})`);
     }
 
     return result;
 }
 
 // ==========================================
-// ER:LC PLAYER / STAFF DATA
+// ER:LC PLAYERS / STAFF
 // ==========================================
 
 async function getERLCPlayers() {
@@ -229,26 +233,17 @@ async function getERLCPlayers() {
         throw new Error('ER:LC API key is not configured.');
     }
 
-    const response = await fetch(
-        'https://api.erlc.gg/v2/server?Players=true',
-        {
-            headers: {
-                'server-key': ERLC_API_KEY
-            }
-        }
-    );
+    const response = await fetch('https://api.erlc.gg/v2/server?Players=true', {
+        headers: { 'server-key': ERLC_API_KEY }
+    });
 
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-        throw new Error(
-            data.message || `ER:LC API error (${response.status})`
-        );
+        throw new Error(data.message || `ER:LC API error (${response.status})`);
     }
 
-    const players = Array.isArray(data)
-        ? data
-        : data.Players;
+    const players = Array.isArray(data) ? data : data.Players;
 
     if (!Array.isArray(players)) {
         throw new Error('Unexpected ER:LC players response.');
@@ -298,7 +293,7 @@ function staffLabel(permission) {
 }
 
 // ==========================================
-// ER:LC EMBEDS & PAGINATION
+// ER:LC LISTS / PAGINATION
 // ==========================================
 
 const LIST_ITEMS_PER_PAGE = 10;
@@ -309,18 +304,9 @@ function createListEmbed(listType, list, page) {
         Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
     );
 
-    const safePage = Math.max(
-        0,
-        Math.min(page, totalPages - 1)
-    );
-
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
     const start = safePage * LIST_ITEMS_PER_PAGE;
-
-    const items = list.slice(
-        start,
-        start + LIST_ITEMS_PER_PAGE
-    );
-
+    const items = list.slice(start, start + LIST_ITEMS_PER_PAGE);
     const isStaff = listType === 'staff';
 
     const description = items.length
@@ -333,11 +319,9 @@ function createListEmbed(listType, list, page) {
 
             return `**${start + index + 1}.** ${name}`;
         }).join('\n')
-        : (
-            isStaff
-                ? 'No staff members are currently in-game.'
-                : 'Nobody is currently in-game.'
-        );
+        : (isStaff
+            ? 'No staff members are currently in-game.'
+            : 'Nobody is currently in-game.');
 
     return new EmbedBuilder()
         .setColor(isStaff ? 0xE74C3C : 0x5865F2)
@@ -377,21 +361,100 @@ async function sendERLCList(message, listType) {
         Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
     );
 
-    const embed = createListEmbed(listType, list, 0);
-
-    const components = totalPages > 1
-        ? [createListButtons(listType, 0, totalPages)]
-        : [];
-
     await message.reply({
-        embeds: [embed],
-        components,
+        embeds: [createListEmbed(listType, list, 0)],
+        components: totalPages > 1
+            ? [createListButtons(listType, 0, totalPages)]
+            : [],
         allowedMentions: { repliedUser: false }
     });
 }
 
 // ==========================================
-// AUTOMATIC ANNOUNCEMENTS
+// PROMOTIONS & INFRACTIONS
+// ==========================================
+
+function createPromotionEmbed(user, newRank, reason, promotedBy) {
+    const embed = new EmbedBuilder()
+        .setColor(0x6B2C5B)
+        .addFields(
+            {
+                name: '🪪 Staff Member:',
+                value: `${user}`,
+                inline: false
+            },
+            {
+                name: '📋 Promotion:',
+                value: `**${newRank}**`,
+                inline: false
+            },
+            {
+                name: '📌 Reason:',
+                value: reason,
+                inline: false
+            }
+        )
+        .setFooter({
+            text: promotedBy.username,
+            iconURL: promotedBy.displayAvatarURL()
+        })
+        .setTimestamp();
+
+    if (fs.existsSync(PROMO_BANNER_PATH)) {
+        embed.setImage('attachment://PROMOBANNER.png');
+    }
+
+    return embed;
+}
+
+function createInfractionEmbed(user, type, reason, issuedBy) {
+    const embed = new EmbedBuilder()
+        .setColor(0xA83232)
+        .addFields(
+            {
+                name: '🪪 Staff Member:',
+                value: `${user}`,
+                inline: false
+            },
+            {
+                name: '⚠️ Infraction:',
+                value: `**${type}**`,
+                inline: false
+            },
+            {
+                name: '📌 Reason:',
+                value: reason,
+                inline: false
+            }
+        )
+        .setFooter({
+            text: issuedBy.username,
+            iconURL: issuedBy.displayAvatarURL()
+        })
+        .setTimestamp();
+
+    if (fs.existsSync(PROMO_BANNER_PATH)) {
+        embed.setImage('attachment://PROMOBANNER.png');
+    }
+
+    return embed;
+}
+
+function getPromoBannerFiles() {
+    if (!fs.existsSync(PROMO_BANNER_PATH)) {
+        console.warn('PROMOBANNER.png not found. Sending embed without banner.');
+        return [];
+    }
+
+    return [
+        new AttachmentBuilder(PROMO_BANNER_PATH, {
+            name: 'PROMOBANNER.png'
+        })
+    ];
+}
+
+// ==========================================
+// AUTO ANNOUNCEMENTS
 // ==========================================
 
 async function sendAutoMessage() {
@@ -401,7 +464,6 @@ async function sendAutoMessage() {
 
     try {
         await runERLCCommand(`h ${message}`);
-
         console.log(`Automatic message sent: ${message}`);
 
         autoMessageIndex =
@@ -420,12 +482,201 @@ function startAutoMessages() {
 
     if (autoMessageTimer) clearInterval(autoMessageTimer);
 
-    autoMessageTimer = setInterval(
-        sendAutoMessage,
-        AUTO_INTERVAL
-    );
-
+    autoMessageTimer = setInterval(sendAutoMessage, AUTO_INTERVAL);
     console.log('Automatic announcements enabled.');
+}
+
+// ==========================================
+// SESSION EMBEDS
+// ==========================================
+
+function createSessionEmbed(action, voteCount = 0) {
+    const joinInfo =
+        'JOIN CODE: hsrUV\n' +
+        'SERVER: Jackson Mississippi Role Play Strict VC Only\n' +
+        'OWNER: nateplayzz';
+
+    const signoff = '*Signed, JMRP Sessions Team.*';
+
+    const details = {
+        start: {
+            title: '🟢 SESSION START UP',
+            color: 0x2ECC71,
+            text:
+                'SESSION START UP!\n' +
+            'Jackson Mississippi Roleplay Session!\n\n' +
+            joinInfo + '\n' +
+            signoff
+        },
+        low: {
+            title: '🟡 SESSION LOW',
+            color: 0xF1C40F,
+            text:
+                'Session Low on Players!\n' +
+            'Join up to keep the session awake!\n\n' +
+            joinInfo + '\n' +
+            signoff
+        },
+        vote: {
+            title: '🗳️ SESSION VOTE',
+            color: 0x3498DB,
+            text:
+                'Session Vote in place!\n' +
+            'Vote to get us to start the session!\n' +
+            `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
+            'If you voted you MUST join!\n\n' +
+            joinInfo + '\n' +
+            signoff
+        },
+        shutdown: {
+            title: '🔴 SESSION SHUTDOWN',
+            color: 0xE74C3C,
+            text:
+                'Session Shutdown!\n' +
+            'Thanks for joining us for this session!\n' +
+            'Vote up our next session!\n\n' +
+            joinInfo + '\n' +
+            signoff
+        }
+    };
+
+    const selected = details[action];
+
+    if (!selected) throw new Error('Unknown session action.');
+
+    const embed = new EmbedBuilder()
+        .setColor(selected.color)
+        .setTitle(selected.title)
+        .setDescription(selected.text)
+        .setFooter({ text: 'JMRP Sessions Team' })
+        .setTimestamp();
+
+    if (fs.existsSync(SESSION_BANNER_PATH)) {
+        embed.setImage('attachment://SESSIONBANNER.png');
+    }
+
+    const files = fs.existsSync(SESSION_BANNER_PATH)
+        ? [
+            new AttachmentBuilder(SESSION_BANNER_PATH, {
+                name: 'SESSIONBANNER.png'
+            })
+        ]
+        : [];
+
+    return { embeds: [embed], files };
+}
+
+// ==========================================
+// SESSION ANNOUNCEMENT PING
+// ==========================================
+
+async function sendSessionAnnouncement(channel, action, voteCount = 0) {
+    return channel.send({
+        content: `<@&${SESSION_PING_ROLE_ID}>`,
+        ...createSessionEmbed(action, voteCount),
+        allowedMentions: {
+            roles: [SESSION_PING_ROLE_ID]
+        }
+    });
+}
+
+// ==========================================
+// SESSION VOTE BUTTON
+// ==========================================
+
+function createVoteButtonRow(messageId, voteCount, completed = false) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`session_vote:${messageId}`)
+            .setLabel(`Vote (${voteCount}/${VOTES_REQUIRED})`)
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(completed)
+    );
+}
+
+// ==========================================
+// TICKET SYSTEM
+// ==========================================
+
+function isTicketChannel(channel) {
+    return channel?.type === ChannelType.GuildText &&
+        typeof channel.topic === 'string' &&
+        channel.topic.includes('ticket-owner=');
+}
+
+function ticketPanelEmbed() {
+    return new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle('🎫 Mississippi RP Support')
+        .setDescription(
+            'Need help? Select a ticket type from the menu below.\n\n' +
+            '• **General Support** — General questions and assistance.\n' +
+            '• **High Rank Support** — Support for high-ranking members.'
+        )
+        .setFooter({ text: 'Mississippi RP Support' });
+}
+
+function ticketPanelMenu() {
+    return new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('ticket_create')
+            .setPlaceholder('Select a ticket type...')
+            .addOptions(
+                {
+                    label: 'General Support',
+                    description: 'Open a general support ticket',
+                    value: 'general',
+                    emoji: '📩'
+                },
+                {
+                    label: 'High Rank Support',
+                    description: 'Open a high rank support ticket',
+                    value: 'highrank',
+                    emoji: '⭐'
+                }
+            )
+    );
+}
+
+function ticketCloseRow() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('ticket_close')
+            .setLabel('Close Ticket')
+            .setEmoji('🔒')
+            .setStyle(ButtonStyle.Danger)
+    );
+}
+
+function ticketSafeName(name) {
+    return name.toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 25) || 'user';
+}
+
+function ticketCloseRequestEmbed(user) {
+    return new EmbedBuilder()
+        .setColor(0xF1C40F)
+        .setTitle('📨 Ticket Closure Requested')
+        .setDescription(`${user} has requested that staff close this ticket.`)
+        .setTimestamp();
+}
+
+function ticketWelcomeEmbed(user, ticketType) {
+    return new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle(ticketType === 'highrank'
+            ? '⭐ High Rank Support'
+            : '📩 General Support')
+        .setDescription(
+            `Welcome ${user}!\n\n` +
+            'Please explain your issue below. Staff will respond when available.\n\n' +
+            'Use the button below when you are finished.'
+        )
+        .setFooter({ text: 'Mississippi RP Support' })
+        .setTimestamp();
 }
 
 // ==========================================
@@ -433,14 +684,6 @@ function startAutoMessages() {
 // ==========================================
 
 const commands = [
-    new SlashCommandBuilder()
-        .setName('tpanel')
-        .setDescription('Post the support ticket panel'),
-
-    new SlashCommandBuilder()
-        .setName('closerequest')
-        .setDescription('Request staff to close this ticket'),
-
     new SlashCommandBuilder()
         .setName('ingamecommand')
         .setDescription('Run an ER:LC server command')
@@ -459,20 +702,90 @@ const commands = [
                 .setDescription('Announcement message')
                 .setRequired(true)
                 .setMaxLength(120)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('promote')
+        .setDescription('Promote a staff member')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('Staff member being promoted')
+                .setRequired(true)
         )
+        .addStringOption(option =>
+            option.setName('newrank')
+                .setDescription('New staff rank')
+                .setRequired(true)
+                .setMaxLength(100)
+        )
+        .addStringOption(option =>
+            option.setName('reason')
+                .setDescription('Reason for promotion')
+                .setRequired(true)
+                .setMaxLength(1000)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('infraction')
+        .setDescription('Record a staff infraction')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('Staff member receiving the infraction')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('type')
+                .setDescription('Infraction type')
+                .setRequired(true)
+                .setMaxLength(100)
+        )
+        .addStringOption(option =>
+            option.setName('reason')
+                .setDescription('Reason for infraction')
+                .setRequired(true)
+                .setMaxLength(1000)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('session')
+        .setDescription('Post a JMRP session announcement')
+        .addSubcommand(sub =>
+            sub.setName('start')
+                .setDescription('Announce session start')
+        )
+        .addSubcommand(sub =>
+            sub.setName('shutdown')
+                .setDescription('Announce session shutdown')
+        )
+        .addSubcommand(sub =>
+            sub.setName('vote')
+                .setDescription('Post a session vote')
+        )
+        .addSubcommand(sub =>
+            sub.setName('low')
+                .setDescription('Announce low session population')
+        ),
+
+    new SlashCommandBuilder()
+        .setName('tpanel')
+        .setDescription('Post the Mississippi RP ticket panel'),
+
+    new SlashCommandBuilder()
+        .setName('closerequest')
+        .setDescription('Request staff to close the current ticket')
 ].map(command => command.toJSON());
 
 // ==========================================
-// READY / COMMAND REFRESH
+// READY
 // ==========================================
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
     client.user.setPresence({
-        status: 'online',
+        status: 'dnd',
         activities: [{
-            name: 'WAITING ER:LC API KEY 🗝️',
+            name: 'Loading status...',
             type: ActivityType.Playing
         }]
     });
@@ -481,69 +794,68 @@ client.once('ready', async () => {
         await client.application.commands.set([]);
 
         const guild = await client.guilds.fetch(GUILD_ID);
-
         await guild.commands.set(commands);
 
         console.log('Slash commands successfully refreshed.');
-
     } catch (error) {
         console.error('Command refresh failed:', error);
     }
 
-    updateERLCStatus();
-
-    setInterval(updateERLCStatus, 60000);
+    rotateStatus();
+    setInterval(rotateStatus, STATUS_ROTATION_INTERVAL);
 
     startAutoMessages();
 });
 
 // ==========================================
-// PLAYER COUNT / BOT PRESENCE
+// ROTATING ER:LC BOT PRESENCE (DND)
 // ==========================================
 
-async function updateERLCStatus() {
-    if (!ERLC_API_KEY) {
-        client.user.setActivity('WAITING ER:LC API KEY 🗝️', {
-            type: ActivityType.Playing
-        });
+async function rotateStatus() {
+    const currentStatus = ROTATING_STATUSES[statusIndex];
 
-        return;
-    }
+    if (currentStatus === 'ER:LC Players') {
+        if (!ERLC_API_KEY) {
+            client.user.setActivity('WAITING ER:LC API KEY 🗝️', {
+                type: ActivityType.Playing
+            });
+        } else {
+            try {
+                const response = await fetch('https://api.erlc.gg/v2/server', {
+                    headers: { 'server-key': ERLC_API_KEY }
+                });
 
-    try {
-        const response = await fetch(
-            'https://api.erlc.gg/v2/server',
-            {
-                headers: {
-                    'server-key': ERLC_API_KEY
+                if (!response.ok) {
+                    throw new Error(`API returned ${response.status}`);
                 }
+
+                const data = await response.json();
+
+                if (typeof data.CurrentPlayers !== 'number') {
+                    throw new Error('Invalid player count response.');
+                }
+
+                client.user.setActivity(`ER:LC Players: ${data.CurrentPlayers}`, {
+                    type: ActivityType.Playing
+                });
+
+                console.log(`ER:LC Players: ${data.CurrentPlayers}`);
+
+            } catch (error) {
+                console.error('Player count error:', error.message);
+
+                client.user.setActivity('ER:LC Players Unavailable', {
+                    type: ActivityType.Playing
+                });
             }
-        );
-
-        if (!response.ok) {
-            throw new Error(`API returned ${response.status}`);
         }
-
-        const data = await response.json();
-
-        if (
-            typeof data.CurrentPlayers !== 'number' ||
-            typeof data.MaxPlayers !== 'number'
-        ) {
-            throw new Error('Invalid player count response.');
-        }
-
-        const playerCount = `${data.CurrentPlayers} Players In-game`;
-
-        client.user.setActivity(playerCount, {
+    } else {
+        client.user.setActivity(currentStatus, {
             type: ActivityType.Playing
         });
-
-        console.log(`ER:LC Players: ${playerCount}`);
-
-    } catch (error) {
-        console.error('Player count error:', error.message);
     }
+
+    statusIndex = (statusIndex + 1) % ROTATING_STATUSES.length;
 }
 
 // ==========================================
@@ -551,32 +863,168 @@ async function updateERLCStatus() {
 // ==========================================
 
 client.on('interactionCreate', async interaction => {
-    // ======================================
-    // ER:LC PLAYER / STAFF PAGINATION
-    // ======================================
+    try {
 
-    if (
-        interaction.isButton() &&
-        interaction.customId.startsWith('erlc_list:')
-    ) {
-        const [, listType, requestedPageRaw] =
-            interaction.customId.split(':');
-
-        if (!['players', 'staff'].includes(listType)) return;
-
-        const requestedPage = Number(requestedPageRaw);
+        // ======================================
+        // TICKET SELECT MENU
+        // ======================================
 
         if (
-            !Number.isInteger(requestedPage) ||
-            requestedPage < 0
+            interaction.isStringSelectMenu() &&
+            interaction.customId === 'ticket_create'
         ) {
-            return interaction.reply({
-                content: 'Invalid page.',
-                ephemeral: true
-            }).catch(() => {});
+            const ticketType = interaction.values[0];
+
+            const categoryId = ticketType === 'highrank'
+                ? HIGH_RANK_TICKET_CATEGORY
+                : GENERAL_TICKET_CATEGORY;
+
+            const ticketLabel = ticketType === 'highrank'
+                ? 'high-rank'
+                : 'general';
+
+            const existing = interaction.guild.channels.cache.find(channel =>
+                isTicketChannel(channel) &&
+                channel.topic.includes(`ticket-owner=${interaction.user.id}`) &&
+                channel.topic.includes(`ticket-type=${ticketType}`)
+            );
+
+            if (existing) {
+                return interaction.reply({
+                    content: `You already have an open ticket: ${existing}`,
+                    ephemeral: true
+                });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+
+            const overwrites = [
+                {
+                    id: interaction.guild.id,
+                    deny: [PermissionFlagsBits.ViewChannel]
+                },
+                {
+                    id: interaction.user.id,
+                    allow: [
+                        PermissionFlagsBits.ViewChannel,
+                        PermissionFlagsBits.SendMessages,
+                        PermissionFlagsBits.ReadMessageHistory,
+                        PermissionFlagsBits.AttachFiles,
+                        PermissionFlagsBits.EmbedLinks
+                    ]
+                },
+                {
+                    id: TICKET_PING_ROLE_ID,
+                    allow: [
+                        PermissionFlagsBits.ViewChannel,
+                        PermissionFlagsBits.SendMessages,
+                        PermissionFlagsBits.ReadMessageHistory
+                    ]
+                },
+                {
+                    id: client.user.id,
+                    allow: [
+                        PermissionFlagsBits.ViewChannel,
+                        PermissionFlagsBits.SendMessages,
+                        PermissionFlagsBits.ReadMessageHistory,
+                        PermissionFlagsBits.ManageChannels
+                    ]
+                }
+            ];
+
+            if (TICKET_STAFF_ROLE_ID) {
+                overwrites.push({
+                    id: TICKET_STAFF_ROLE_ID,
+                    allow: [
+                        PermissionFlagsBits.ViewChannel,
+                        PermissionFlagsBits.SendMessages,
+                        PermissionFlagsBits.ReadMessageHistory
+                    ]
+                });
+            }
+
+            const ticketChannel = await interaction.guild.channels.create({
+                name: `ticket-${ticketLabel}-${ticketSafeName(interaction.user.username)}`,
+                type: ChannelType.GuildText,
+                parent: categoryId,
+                topic: `ticket-owner=${interaction.user.id};ticket-type=${ticketType}`,
+                permissionOverwrites: overwrites
+            });
+
+            await ticketChannel.send({
+                content: `<@${TICKET_PING_ROLE_ID}> <@${interaction.user.id}>`,
+                embeds: [ticketWelcomeEmbed(interaction.user, ticketType)],
+                components: [ticketCloseRow()],
+                allowedMentions: {
+                    users: [interaction.user.id],
+                    roles: [TICKET_PING_ROLE_ID]
+                }
+            });
+
+            return interaction.editReply({
+                content: `✅ Your ticket has been created: ${ticketChannel}`
+            });
         }
 
-        try {
+        // ======================================
+        // TICKET CLOSE BUTTON
+        // ======================================
+
+        if (
+            interaction.isButton() &&
+            interaction.customId === 'ticket_close'
+        ) {
+            if (!isTicketChannel(interaction.channel)) {
+                return interaction.reply({
+                    content: 'This button can only be used in a ticket.',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.reply({
+                content: '🔒 This ticket is being closed...',
+                ephemeral: true
+            });
+
+            await interaction.channel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setColor(0xE74C3C)
+                        .setTitle('🔒 Ticket Closed')
+                        .setDescription(`Closed by ${interaction.user}.`)
+                        .setTimestamp()
+                ]
+            }).catch(() => {});
+
+            setTimeout(() => {
+                interaction.channel.delete('Ticket closed by ticket participant').catch(() => {});
+            }, 3000);
+
+            return;
+        }
+
+        // ======================================
+        // ER:LC PLAYER / STAFF PAGINATION
+        // ======================================
+
+        if (
+            interaction.isButton() &&
+            interaction.customId.startsWith('erlc_list:')
+        ) {
+            const [, listType, requestedPageRaw] =
+                interaction.customId.split(':');
+
+            if (!['players', 'staff'].includes(listType)) return;
+
+            const requestedPage = Number(requestedPageRaw);
+
+            if (!Number.isInteger(requestedPage) || requestedPage < 0) {
+                return interaction.reply({
+                    content: 'Invalid page.',
+                    ephemeral: true
+                }).catch(() => {});
+            }
+
             await interaction.deferUpdate();
 
             const allPlayers = await getERLCPlayers();
@@ -590,10 +1038,7 @@ client.on('interactionCreate', async interaction => {
                 Math.ceil(list.length / LIST_ITEMS_PER_PAGE)
             );
 
-            const page = Math.min(
-                requestedPage,
-                totalPages - 1
-            );
+            const page = Math.min(requestedPage, totalPages - 1);
 
             await interaction.editReply({
                 embeds: [createListEmbed(listType, list, page)],
@@ -602,118 +1047,318 @@ client.on('interactionCreate', async interaction => {
                     : []
             });
 
-        } catch (error) {
-            console.error('ER:LC list pagination error:', error);
+            return;
+        }
+
+        // ======================================
+        // SESSION VOTE BUTTON
+        // ======================================
+
+        if (
+            interaction.isButton() &&
+            interaction.customId.startsWith('session_vote:')
+        ) {
+            const voteMessageId = interaction.customId.split(':')[1];
+            const voteData = sessionVotes.get(voteMessageId);
+
+            if (!voteData) {
+                return interaction.reply({
+                    content: 'This vote is no longer available.',
+                    ephemeral: true
+                });
+            }
+
+            if (voteData.completed) {
+                return interaction.reply({
+                    content: 'This vote has already reached its goal.',
+                    ephemeral: true
+                });
+            }
+
+            if (voteData.users.has(interaction.user.id)) {
+                return interaction.reply({
+                    content: 'You have already voted on this session!',
+                    ephemeral: true
+                });
+            }
+
+            voteData.users.add(interaction.user.id);
+            const voteCount = voteData.users.size;
+
+            await interaction.deferUpdate();
+
+            await interaction.message.edit({
+                embeds: [createSessionEmbed('vote', voteCount).embeds[0]],
+                components: [
+                    createVoteButtonRow(voteMessageId, voteCount, voteCount >= VOTES_REQUIRED)
+                ]
+            });
+
+            if (voteCount >= VOTES_REQUIRED) {
+                voteData.completed = true;
+
+                await sendSessionAnnouncement(interaction.channel, 'start');
+
+                await interaction.followUp({
+                    content: '✅ 5 votes reached! Session Start announcement posted!',
+                    ephemeral: true
+                }).catch(() => {});
+
+                return;
+            }
 
             await interaction.followUp({
-                content: 'Unable to refresh this list right now.',
+                content: `Your vote has been counted! **${voteCount}/${VOTES_REQUIRED}**`,
                 ephemeral: true
             }).catch(() => {});
+
+            return;
         }
 
-        return;
-    }
+        // ======================================
+        // PASSWORD MANAGER BUTTONS (DEVID ONLY)
+        // ======================================
 
-    // ======================================
-    // PASSWORD MANAGER BUTTONS
-    // DEVID ONLY
-    // ======================================
+        if (interaction.isButton() && interaction.customId.startsWith('passreg_')) {
+            if (interaction.user.id !== DEVID) {
+                return interaction.reply({
+                    content: 'You are not authorized to use this panel.',
+                    ephemeral: true
+                }).catch(() => {});
+            }
 
-    if (
-        interaction.isButton() &&
-        ['passreg_set', 'passreg_delete', 'passreg_delete_cancel', 'passreg_delete_confirm'].includes(interaction.customId)
-    ) {
-        if (interaction.user.id !== DEVID) {
-            return interaction.reply({
-                content: 'You are not authorized to use this panel.',
-                ephemeral: true
-            }).catch(() => {});
+            if (interaction.customId === 'passreg_set') {
+                return interaction.showModal(passwordModal());
+            }
+
+            if (interaction.customId === 'passreg_delete') {
+                return interaction.reply({
+                    content:
+                        '⚠️ **Are you sure you want to delete the panel password?**\n' +
+                        'This may prevent access to the website until a new password is registered.',
+                    components: [deleteConfirmationButtons()],
+                    ephemeral: true
+                });
+            }
+
+            if (interaction.customId === 'passreg_delete_cancel') {
+                return interaction.update({
+                    content: 'Password deletion cancelled.',
+                    components: []
+                });
+            }
+
+            if (interaction.customId === 'passreg_delete_confirm') {
+                await interaction.deferReply({ ephemeral: true });
+
+                try {
+                    await panelRequest('/api/delete-password');
+                    return interaction.editReply('✅ Panel password deletion request completed.');
+                } catch (error) {
+                    return interaction.editReply(`❌ Unable to delete password: ${error.message}`);
+                }
+            }
+
+            return;
         }
 
-        if (interaction.customId === 'passreg_set') {
-            return interaction.showModal(passwordModal());
-        }
+        // ======================================
+        // PASSWORD MODAL
+        // ======================================
 
-        if (interaction.customId === 'passreg_delete') {
-            return interaction.reply({
-                content:
-                    '⚠️ **Are you sure you want to delete the panel password?**\n' +
-                    'This may prevent access to the website until a new password is registered.',
-                components: [deleteConfirmationButtons()],
-                ephemeral: true
-            });
-        }
+        if (interaction.isModalSubmit()) {
+            if (interaction.user.id !== DEVID) {
+                return interaction.reply({
+                    content: 'You are not authorized.',
+                    ephemeral: true
+                });
+            }
 
-        if (interaction.customId === 'passreg_delete_cancel') {
-            return interaction.update({
-                content: 'Password deletion cancelled.',
-                components: []
-            });
-        }
+            if (interaction.customId === 'passreg_password_modal') {
+                await interaction.deferReply({ ephemeral: true });
 
-        if (interaction.customId === 'passreg_delete_confirm') {
-            await interaction.deferReply({ ephemeral: true });
+                const password = interaction.fields.getTextInputValue('panel_password');
 
-            try {
-                await panelRequest('/api/delete-password');
+                try {
+                    await panelRequest('/api/setup', { password });
 
-                return interaction.editReply(
-                    '✅ Panel password deletion request completed.'
-                );
-
-            } catch (error) {
-                return interaction.editReply(
-                    `❌ Unable to delete password: ${error.message}`
-                );
+                    return interaction.editReply(
+                        '✅ Your Mississippi RP Panel password has been registered successfully.'
+                    );
+                } catch (error) {
+                    return interaction.editReply(`❌ Password setup failed: ${error.message}`);
+                }
             }
         }
-    }
 
-    // ======================================
-    // PASSWORD MODAL HANDLER
-    // ======================================
+        // ======================================
+        // SLASH COMMANDS
+        // ======================================
 
-    if (interaction.isModalSubmit()) {
-        if (interaction.user.id !== DEVID) {
-            return interaction.reply({
-                content: 'You are not authorized.',
-                ephemeral: true
+        if (!interaction.isChatInputCommand()) return;
+
+        const command = interaction.commandName;
+
+        // ======================================
+        // /TPANEL - DEVID ONLY
+        // ======================================
+
+        if (command === 'tpanel') {
+            if (interaction.user.id !== DEVID) {
+                return interaction.reply({
+                    content: 'Only DEVID can post the ticket panel.',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.reply({
+                embeds: [ticketPanelEmbed()],
+                components: [ticketPanelMenu()]
+            });
+
+            return;
+        }
+
+        // ======================================
+        // /CLOSEREQUEST - STAFF ONLY
+        // ======================================
+
+        if (command === 'closerequest') {
+            if (!isTicketChannel(interaction.channel)) {
+                return interaction.reply({
+                    content: 'This command can only be used inside a ticket.',
+                    ephemeral: true
+                });
+            }
+
+            const member = await interaction.guild.members.fetch(interaction.user.id);
+
+            if (!hasTicketStaff(member)) {
+                return interaction.reply({
+                    content: 'Only ticket staff can request ticket closure.',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.reply({
+                content: `<@&${TICKET_STAFF_ROLE_ID}>`,
+                embeds: [ticketCloseRequestEmbed(interaction.user)],
+                allowedMentions: { roles: [TICKET_STAFF_ROLE_ID] }
+            });
+
+            return;
+        }
+
+        if (![
+            'ingamecommand',
+            'announce',
+            'session',
+            'promote',
+            'infraction'
+        ].includes(command)) return;
+
+        // ======================================
+        // PROMOTION / INFRACTION COMMANDS
+        // ======================================
+
+        if (command === 'promote' || command === 'infraction') {
+            if (!await hasAccess(interaction)) {
+                return interaction.reply({
+                    content: 'You do not have permission to use this command.',
+                    ephemeral: true
+                });
+            }
+
+            const targetUser = interaction.options.getUser('user');
+            const reason = interaction.options.getString('reason');
+
+            await interaction.deferReply();
+
+            if (command === 'promote') {
+                const newRank = interaction.options.getString('newrank');
+
+                const embed = createPromotionEmbed(
+                    targetUser,
+                    newRank,
+                    reason,
+                    interaction.user
+                );
+
+                return interaction.editReply({
+                    embeds: [embed],
+                    files: getPromoBannerFiles()
+                });
+            }
+
+            if (command === 'infraction') {
+                const type = interaction.options.getString('type');
+
+                const embed = createInfractionEmbed(
+                    targetUser,
+                    type,
+                    reason,
+                    interaction.user
+                );
+
+                return interaction.editReply({
+                    embeds: [embed],
+                    files: getPromoBannerFiles()
+                });
+            }
+        }
+
+        // ======================================
+        // SESSION COMMANDS
+        // ======================================
+
+        if (command === 'session') {
+            const member = await interaction.guild.members.fetch(interaction.user.id);
+
+            if (!member.roles.cache.has(SESSION_ROLE_ID)) {
+                return interaction.reply({
+                    content: 'You do not have permission to use /session.',
+                    ephemeral: true
+                });
+            }
+
+            const action = interaction.options.getSubcommand(true);
+
+            if (action === 'vote') {
+                await interaction.deferReply({ ephemeral: true });
+
+                const voteMessage = await sendSessionAnnouncement(
+                    interaction.channel,
+                    'vote',
+                    0
+                );
+
+                sessionVotes.set(voteMessage.id, {
+                    users: new Set(),
+                    completed: false,
+                    channelId: interaction.channelId
+                });
+
+                await voteMessage.edit({
+                    components: [createVoteButtonRow(voteMessage.id, 0, false)]
+                });
+
+                return interaction.editReply({
+                    content: 'Session vote posted!'
+                });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+            await sendSessionAnnouncement(interaction.channel, action);
+
+            return interaction.editReply({
+                content: 'Session announcement sent.'
             });
         }
 
-        if (interaction.customId === 'passreg_password_modal') {
-            await interaction.deferReply({ ephemeral: true });
+        // ======================================
+        // OTHER COMMAND PERMISSIONS
+        // ======================================
 
-            const password = interaction.fields.getTextInputValue(
-                'panel_password'
-            );
-
-            try {
-                await panelRequest('/api/setup', { password });
-
-                return interaction.editReply(
-                    '✅ Your Mississippi RP Panel password has been registered successfully.'
-                );
-
-            } catch (error) {
-                return interaction.editReply(
-                    `❌ Password setup failed: ${error.message}`
-                );
-            }
-        }
-    }
-
-    // ======================================
-    // SLASH COMMAND HANDLER
-    // ======================================
-
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = interaction.commandName;
-
-    if (!['ingamecommand', 'announce'].includes(command)) return;
-
-    try {
         if (!await hasAccess(interaction)) {
             return interaction.reply({
                 content: 'You do not have permission to use this command.',
@@ -725,7 +1370,6 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'ingamecommand') {
             const input = interaction.options.getString('command');
-
             const result = await runERLCCommand(input);
 
             return interaction.editReply(
@@ -735,7 +1379,6 @@ client.on('interactionCreate', async interaction => {
 
         if (command === 'announce') {
             const message = interaction.options.getString('message');
-
             const result = await runERLCCommand(`h ${message}`);
 
             return interaction.editReply(
@@ -744,7 +1387,7 @@ client.on('interactionCreate', async interaction => {
         }
 
     } catch (error) {
-        console.error('Command error:', error);
+        console.error('Interaction error:', error);
 
         const reply = {
             content: `❌ ${error.message}`,
@@ -752,9 +1395,9 @@ client.on('interactionCreate', async interaction => {
         };
 
         if (interaction.deferred || interaction.replied) {
-            await interaction.editReply(reply);
+            await interaction.editReply(reply).catch(() => {});
         } else {
-            await interaction.reply(reply);
+            await interaction.reply(reply).catch(() => {});
         }
     }
 });
@@ -769,12 +1412,7 @@ client.on('messageCreate', async message => {
     const content = message.content.trim().toLowerCase();
 
     // ======================================
-    // SECRET PASSWORD COMMAND
-    // DEVID ONLY
-    // ======================================
-
-    // ======================================
-    // ER:LC PLAYER / STAFF COMMANDS
+    // ER:LC PLAYER / STAFF
     // ======================================
 
     if (
@@ -787,7 +1425,6 @@ client.on('messageCreate', async message => {
 
         try {
             await sendERLCList(message, listType);
-
         } catch (error) {
             console.error('ER:LC list command error:', error);
 
@@ -796,9 +1433,7 @@ client.on('messageCreate', async message => {
                     new EmbedBuilder()
                         .setColor(0xED4245)
                         .setTitle('ER:LC API Error')
-                        .setDescription(
-                            'Unable to retrieve the requested list right now.'
-                        )
+                        .setDescription('Unable to retrieve the requested list right now.')
                 ]
             }).catch(() => {});
         }
@@ -807,7 +1442,7 @@ client.on('messageCreate', async message => {
     }
 
     // ======================================
-    // PUBLIC -PING
+    // -PING
     // ======================================
 
     if (content !== '-ping') return;
@@ -835,240 +1470,6 @@ client.on('messageCreate', async message => {
         embeds: [embed],
         allowedMentions: { repliedUser: false }
     });
-});
-
-// ==========================================
-// TICKET SYSTEM
-// ==========================================
-
-const GENERAL_TICKET_CATEGORY = '1567704667884888084';
-const HIGH_RANK_TICKET_CATEGORY = '1573776599512518716';
-const TICKET_PING_ROLE = '1567075807829164127';
-const TICKET_STAFF_ROLE = process.env.TICKET_STAFF_ROLE_ID;
-
-function isTicketChannel(channel) {
-    return channel?.type === 0 && typeof channel.topic === 'string' && channel.topic.includes('ticket-owner=');
-}
-
-client.on('interactionCreate', async interaction => {
-    try {
-        if (interaction.isChatInputCommand() && interaction.commandName === 'tpanel') {
-            if (interaction.user.id !== DEVID) {
-                return interaction.reply({ content: 'You are not authorized to use this command.', ephemeral: true });
-            }
-
-            const embed = new EmbedBuilder()
-                .setColor(0x5865F2)
-                .setTitle('Support Tickets')
-                .setDescription(
-                    'Choose your category below to open a ticket.\n\n' +
-                    '⚙️ **General Support:** Questions, support, and assistance from staff members.\n' +
-                    '👤 **High Rank Support:** Escalated concerns requiring senior staff attention.'
-                );
-
-            const menu = new StringSelectMenuBuilder()
-                .setCustomId('ticket_category_select')
-                .setPlaceholder('Choose your category')
-                .addOptions(
-                    {
-                        label: 'General Support',
-                        description: 'Questions and staff assistance',
-                        value: 'general',
-                        emoji: '⚙️'
-                    },
-                    {
-                        label: 'High Rank Support',
-                        description: 'Escalated concerns for senior staff',
-                        value: 'highrank',
-                        emoji: '👤'
-                    }
-                );
-
-            await interaction.channel.send({
-                embeds: [embed],
-                components: [
-                    new ActionRowBuilder().addComponents(menu)
-                ]
-            });
-
-            return interaction.reply({
-                content: 'Ticket panel posted.',
-                ephemeral: true
-            });
-        }
-
-        if (interaction.isChatInputCommand() && interaction.commandName === 'closerequest') {
-            if (!isTicketChannel(interaction.channel)) {
-                return interaction.reply({
-                    content: 'This command only works inside a ticket.',
-                    ephemeral: true
-                });
-            }
-
-            if (
-                !TICKET_STAFF_ROLE ||
-                !interaction.member.roles.cache.has(TICKET_STAFF_ROLE)
-            ) {
-                return interaction.reply({
-                    content: 'Only staff can use this command.',
-                    ephemeral: true
-                });
-            }
-
-            const embed = new EmbedBuilder()
-                .setColor(0xED4245)
-                .setTitle('Ticket Closure Requested')
-                .setDescription(
-                    `A staff member has requested this ticket be closed.\n\n` +
-                    `**Requested by:** ${interaction.user}\n` +
-                    `Please review and close this ticket when appropriate.`
-                )
-                .setTimestamp();
-
-            return interaction.reply({
-                content: `<@&${TICKET_STAFF_ROLE}>`,
-                embeds: [embed]
-            });
-        }
-
-        if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_category_select') {
-            await interaction.deferReply({ ephemeral: true });
-
-            const choice = interaction.values[0];
-
-            const categoryId = choice === 'general'
-                ? GENERAL_TICKET_CATEGORY
-                : HIGH_RANK_TICKET_CATEGORY;
-
-            const categoryLabel = choice === 'general'
-                ? 'General Support'
-                : 'High Rank Support';
-
-            const category = await interaction.guild.channels.fetch(categoryId).catch(() => null);
-
-            if (!category || category.type !== 4) {
-                return interaction.editReply(
-                    'Ticket category is missing or is not a category channel.'
-                );
-            }
-
-            const alreadyOpen = interaction.guild.channels.cache.find(
-                ch => ch.type === 0 && ch.topic?.includes(`ticket-owner=${interaction.user.id}`)
-            );
-
-            if (alreadyOpen) {
-                return interaction.editReply(
-                    `You already have a ticket open: ${alreadyOpen}`
-                );
-            }
-
-            const channel = await interaction.guild.channels.create({
-                name: `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 20)}`,
-                type: 0,
-                parent: categoryId,
-                topic: `ticket-owner=${interaction.user.id};ticket-type=${choice}`,
-                permissionOverwrites: [
-                    {
-                        id: interaction.guild.roles.everyone.id,
-                        deny: [PermissionFlagsBits.ViewChannel]
-                    },
-                    {
-                        id: interaction.user.id,
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.ReadMessageHistory,
-                            PermissionFlagsBits.AttachFiles
-                        ]
-                    },
-                    {
-                        id: TICKET_PING_ROLE,
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.ReadMessageHistory
-                        ]
-                    },
-                    {
-                        id: client.user.id,
-                        allow: [
-                            PermissionFlagsBits.ViewChannel,
-                            PermissionFlagsBits.SendMessages,
-                            PermissionFlagsBits.ReadMessageHistory,
-                            PermissionFlagsBits.ManageChannels
-                        ]
-                    }
-                ]
-            });
-
-            const ticketEmbed = new EmbedBuilder()
-                .setColor(0x5865F2)
-                .setTitle(categoryLabel)
-                .setDescription(
-                    `Welcome ${interaction.user}!\n\n` +
-                    `Please describe your issue and staff will assist you.\n\n` +
-                    `**Category:** ${categoryLabel}`
-                )
-                .setTimestamp();
-
-            const close = new ButtonBuilder()
-                .setCustomId('ticket_close')
-                .setLabel('Close Ticket')
-                .setEmoji('🔒')
-                .setStyle(ButtonStyle.Danger);
-
-            await channel.send({
-                content: `<@&${TICKET_PING_ROLE}> ${interaction.user}`,
-                embeds: [ticketEmbed],
-                components: [
-                    new ActionRowBuilder().addComponents(close)
-                ],
-                allowedMentions: {
-                    roles: [TICKET_PING_ROLE],
-                    users: [interaction.user.id]
-                }
-            });
-
-            return interaction.editReply(
-                `Ticket created: ${channel}`
-            );
-        }
-
-        if (interaction.isButton() && interaction.customId === 'ticket_close') {
-            if (!isTicketChannel(interaction.channel)) {
-                return interaction.reply({
-                    content: 'This button only works in tickets.',
-                    ephemeral: true
-                });
-            }
-
-            await interaction.reply({
-                content: `🔒 Ticket closed by ${interaction.user}.`
-            });
-
-            const ticketChannel = interaction.channel;
-
-            setTimeout(() => {
-                ticketChannel.delete(
-                    `Ticket closed by ${interaction.user.tag}`
-                ).catch(err => console.error('Ticket close error:', err));
-            }, 3000);
-        }
-
-    } catch (err) {
-        console.error('Ticket system error:', err);
-
-        if (
-            interaction.isRepliable() &&
-            !interaction.replied &&
-            !interaction.deferred
-        ) {
-            interaction.reply({
-                content: 'Ticket interaction failed.',
-                ephemeral: true
-            }).catch(() => {});
-        }
-    }
 });
 
 // ==========================================
