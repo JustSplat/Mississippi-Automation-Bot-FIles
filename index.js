@@ -31,6 +31,23 @@ const SESSION_PING_ROLE_ID = '1567075807619448860';
 const PANEL_URL = (process.env.PANEL_URL || '').replace(/\/+$/, '');
 const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
 
+// ==========================================
+// STATUS ROTATIONS
+// ==========================================
+
+const ROTATING_STATUSES = [
+    'ER:LC Players',
+    'Bringing SESSIONS!'
+];
+
+let statusIndex = 0;
+
+const STATUS_ROTATION_INTERVAL = 15000;
+
+// ==========================================
+// AUTO MESSAGES
+// ==========================================
+
 const AUTO_MESSAGES = (process.env.AUTO_MESSAGES || '')
     .split('|')
     .map(m => m.trim())
@@ -314,7 +331,7 @@ function createListEmbed(listType, list, page) {
                 return `**${start + index + 1}.** ${name} — *${staffLabel(playerPermission(item))}*`;
             }
 
-            return `**${start + index + 1}.** ${name}`;
+            return `**${start + index + 1}.** ${name`;
         }).join('\n')
         : (
             isStaff
@@ -437,8 +454,8 @@ function createSessionEmbed(action, voteCount = 0) {
             color: 0xF1C40F,
             text:
                 'Session Low on Players!\n' +
-                'Join up to keep the session awake!\n\n' +
-                joinInfo + '\n' +
+            'Join up to keep the session awake!\n\n' +
+            joinInfo + '\n' +
             signoff
         },
 
@@ -447,8 +464,8 @@ function createSessionEmbed(action, voteCount = 0) {
             color: 0x3498DB,
             text:
                 'Session Vote in place!\n' +
-                'Vote to get us to start the session!\n' +
-                `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
+            'Vote to get us to start the session!\n' +
+            `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
             'If you voted you MUST join!\n\n' +
             joinInfo + '\n' +
             signoff
@@ -459,9 +476,9 @@ function createSessionEmbed(action, voteCount = 0) {
             color: 0xE74C3C,
             text:
                 'Session Shutdown!\n' +
-                'Thanks for joining us for this session!\n' +
-                'Vote up our next session!\n\n' +
-                joinInfo + '\n' +
+            'Thanks for joining us for this session!\n' +
+            'Vote up our next session!\n\n' +
+            joinInfo + '\n' +
             signoff
         }
     };
@@ -498,7 +515,7 @@ function createSessionEmbed(action, voteCount = 0) {
 }
 
 // ==========================================
-// SESSION ANNOUNCEMENT PING (ADDED)
+// SESSION ANNOUNCEMENT PING
 // ==========================================
 
 async function sendSessionAnnouncement(channel, action, voteCount = 0) {
@@ -578,10 +595,11 @@ const commands = [
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
+    // DND permanently
     client.user.setPresence({
-        status: 'online',
+        status: 'dnd',
         activities: [{
-            name: 'WAITING ER:LC API KEY 🗝️',
+            name: 'Loading status...',
             type: ActivityType.Playing
         }]
     });
@@ -598,58 +616,70 @@ client.once('ready', async () => {
         console.error('Command refresh failed:', error);
     }
 
-    updateERLCStatus();
-    setInterval(updateERLCStatus, 60000);
+    // Start rotating status
+    rotateStatus();
+    setInterval(rotateStatus, STATUS_ROTATION_INTERVAL);
 
     startAutoMessages();
 });
 
 // ==========================================
-// ER:LC BOT PRESENCE
+// ROTATING ER:LC BOT PRESENCE (DND)
 // ==========================================
 
-async function updateERLCStatus() {
-    if (!ERLC_API_KEY) {
-        client.user.setActivity('WAITING ER:LC API KEY 🗝️', {
-            type: ActivityType.Playing
-        });
-        return;
-    }
+async function rotateStatus() {
+    const currentStatus = ROTATING_STATUSES[statusIndex];
 
-    try {
-        const response = await fetch(
-            'https://api.erlc.gg/v2/server',
-            {
-                headers: {
-                    'server-key': ERLC_API_KEY
+    if (currentStatus === 'ER:LC Players') {
+        if (!ERLC_API_KEY) {
+            client.user.setActivity('WAITING ER:LC API KEY 🗝️', {
+                type: ActivityType.Playing
+            });
+        } else {
+            try {
+                const response = await fetch(
+                    'https://api.erlc.gg/v2/server',
+                    {
+                        headers: {
+                            'server-key': ERLC_API_KEY
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`API returned ${response.status}`);
                 }
+
+                const data = await response.json();
+
+                if (typeof data.CurrentPlayers !== 'number') {
+                    throw new Error('Invalid player count response.');
+                }
+
+                client.user.setActivity(
+                    `ER:LC Players: ${data.CurrentPlayers}`,
+                    {
+                        type: ActivityType.Playing
+                    }
+                );
+
+                console.log(`ER:LC Players: ${data.CurrentPlayers}`);
+
+            } catch (error) {
+                console.error('Player count error:', error.message);
+
+                client.user.setActivity('ER:LC Players Unavailable', {
+                    type: ActivityType.Playing
+                });
             }
-        );
-
-        if (!response.ok) {
-            throw new Error(`API returned ${response.status}`);
         }
-
-        const data = await response.json();
-
-        if (
-            typeof data.CurrentPlayers !== 'number' ||
-            typeof data.MaxPlayers !== 'number'
-        ) {
-            throw new Error('Invalid player count response.');
-        }
-
-        const playerCount = `${data.CurrentPlayers} Players In-game`;
-
-        client.user.setActivity(playerCount, {
+    } else {
+        client.user.setActivity(currentStatus, {
             type: ActivityType.Playing
         });
-
-        console.log(`ER:LC Players: ${playerCount}`);
-
-    } catch (error) {
-        console.error('Player count error:', error.message);
     }
+
+    statusIndex = (statusIndex + 1) % ROTATING_STATUSES.length;
 }
 
 // ==========================================
@@ -839,7 +869,7 @@ client.on('interactionCreate', async interaction => {
 
                 return interaction.editReply(
                     '✅ Panel password deletion request completed.'
-            );
+                );
 
             } catch (error) {
                 return interaction.editReply(
