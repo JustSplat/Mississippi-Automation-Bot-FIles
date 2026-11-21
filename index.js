@@ -434,7 +434,8 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🟡 SESSION LOW',
             color: 0xF1C40F,
             text:
-                'Session Low on Players! Join up to keep the session awake!\n\n' +
+                'Session Low on Players!\n' +
+                'Join up to keep the session awake!\n\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -443,7 +444,8 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🗳️ SESSION VOTE',
             color: 0x3498DB,
             text:
-                'Session Vote in place! Vote to get us to start the session!\n' +
+                'Session Vote in place!\n' +
+                'Vote to get us to start the session!\n' +
                 `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
                 'If you voted you MUST join!\n\n' +
                 joinInfo + '\n' +
