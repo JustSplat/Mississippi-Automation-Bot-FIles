@@ -62,6 +62,18 @@ let autoMessageTimer = null;
 let autoMessageIndex = 0;
 
 // ==========================================
+// SESSION VOTING
+// ==========================================
+
+const SESSION_ROLE_ID = '1573525177298329692';
+const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
+
+const VOTES_REQUIRED = 5;
+
+// Each vote message has its own voting data
+const sessionVotes = new Map();
+
+// ==========================================
 // PERMISSIONS
 // ==========================================
 
@@ -395,15 +407,11 @@ function startAutoMessages() {
 }
 
 // ==========================================
-// SESSION ANNOUNCEMENTS
+// SESSION EMBEDS
 // ==========================================
 
-const SESSION_ROLE_ID = '1573525177298329692';
-const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
+function createSessionEmbed(action, voteCount = 0) {
 
-function createSessionEmbed(action) {
-
-    // Join information — each on its own inline-code line
     const joinInfo =
         '`JOIN CODE: hsrUV`\n' +
         '`SERVER: Jackson Mississippi Role Play Strict VC Only`\n' +
@@ -411,14 +419,13 @@ function createSessionEmbed(action) {
 
     const signoff = '*Signed, JMRP Sessions Team.*';
 
-    // NO BLANK LINES BETWEEN ANY OF THESE TEXT LINES
+    // NO BLANK LINES BETWEEN TEXT
     const details = {
         start: {
             title: '🟢 SESSION START',
             color: 0x2ECC71,
             text:
-                'Session Start!\n' +
-                'Jackson Mississippi Roleplay Session!\n\n' +
+                'SESSION START: Jackson Mississippi Roleplay Session!\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -427,8 +434,7 @@ function createSessionEmbed(action) {
             title: '🟡 SESSION LOW',
             color: 0xF1C40F,
             text:
-                'Session Low on Players!\n' +
-                'Join up to keep the session awake!\n\n' +
+                'Session Low on Players! Join up to keep the session awake!\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -437,10 +443,9 @@ function createSessionEmbed(action) {
             title: '🗳️ SESSION VOTE',
             color: 0x3498DB,
             text:
-                'Session Vote in place!\n' +
-                'Vote to get us to start the session!\n' +
-                'Votes needed: 5\n' +
-                'If you voted you MUST join!\n\n' +
+                'Session Vote in place! Vote to get us to start the session!\n' +
+                `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
+                'If you voted you MUST join!\n' +
                 joinInfo + '\n' +
                 signoff
         },
@@ -451,7 +456,7 @@ function createSessionEmbed(action) {
             text:
                 'Session Shutdown!\n' +
                 'Thanks for joining us for this session!\n' +
-                'Vote up our next session!\n\n' +
+                'Vote up our next session!\n' +
                 joinInfo + '\n' +
                 signoff
         }
@@ -470,22 +475,36 @@ function createSessionEmbed(action) {
         .setFooter({ text: 'JMRP Sessions Team' })
         .setTimestamp();
 
-    const files = [];
-
     if (fs.existsSync(SESSION_BANNER_PATH)) {
         embed.setImage('attachment://SESSIONBANNER.png');
+    }
 
-        files.push(
+    const files = fs.existsSync(SESSION_BANNER_PATH)
+        ? [
             new AttachmentBuilder(SESSION_BANNER_PATH, {
                 name: 'SESSIONBANNER.png'
             })
-        );
-    }
+        ]
+        : [];
 
     return {
         embeds: [embed],
         files
     };
+}
+
+// ==========================================
+// SESSION VOTE BUTTON
+// ==========================================
+
+function createVoteButtonRow(messageId, voteCount, completed = false) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`session_vote:${messageId}`)
+            .setLabel(`Vote (${voteCount}/${VOTES_REQUIRED})`)
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(completed)
+    );
 }
 
 // ==========================================
@@ -526,7 +545,7 @@ const commands = [
         )
         .addSubcommand(sub =>
             sub.setName('vote')
-                .setDescription('Post a session vote announcement')
+                .setDescription('Post a session vote')
         )
         .addSubcommand(sub =>
             sub.setName('low')
@@ -557,7 +576,6 @@ client.once('ready', async () => {
         await guild.commands.set(commands);
 
         console.log('Slash commands successfully refreshed.');
-
     } catch (error) {
         console.error('Command refresh failed:', error);
     }
@@ -621,6 +639,85 @@ async function updateERLCStatus() {
 // ==========================================
 
 client.on('interactionCreate', async interaction => {
+
+    // ======================================
+    // SESSION VOTE BUTTON
+    // ======================================
+
+    if (
+        interaction.isButton() &&
+        interaction.customId.startsWith('session_vote:')
+    ) {
+        const voteMessageId = interaction.customId.split(':')[1];
+        const voteData = sessionVotes.get(voteMessageId);
+
+        if (!voteData) {
+            return interaction.reply({
+                content: 'This vote is no longer available.',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        if (voteData.completed) {
+            return interaction.reply({
+                content: 'This vote has already reached its goal.',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        if (voteData.users.has(interaction.user.id)) {
+            return interaction.reply({
+                content: 'You have already voted on this session!',
+                ephemeral: true
+            }).catch(() => {});
+        }
+
+        voteData.users.add(interaction.user.id);
+
+        const voteCount = voteData.users.size;
+
+        if (voteCount >= VOTES_REQUIRED) {
+            voteData.completed = true;
+
+            await interaction.deferUpdate();
+
+            await interaction.message.edit({
+                embeds: [createSessionEmbed('vote', VOTES_REQUIRED).embeds[0]],
+                components: [
+                    createVoteButtonRow(voteMessageId, VOTES_REQUIRED, true)
+                ]
+            });
+
+            // Automatically post SESSION START when 5 votes are reached
+            await interaction.channel.send({
+                ...createSessionEmbed('start'),
+                allowedMentions: { parse: [] }
+            });
+
+            await interaction.followUp({
+                content: '✅ 5 votes reached! Session Start announcement posted!',
+                ephemeral: true
+            }).catch(() => {});
+
+            return;
+        }
+
+        await interaction.deferUpdate();
+
+        await interaction.message.edit({
+            embeds: [createSessionEmbed('vote', voteCount).embeds[0]],
+            components: [
+                createVoteButtonRow(voteMessageId, voteCount, false)
+            ]
+        });
+
+        await interaction.followUp({
+            content: `Your vote has been counted! **${voteCount}/${VOTES_REQUIRED}**`,
+            ephemeral: true
+        }).catch(() => {});
+
+        return;
+    }
 
     // ======================================
     // ER:LC PLAYER / STAFF PAGINATION
@@ -794,7 +891,6 @@ client.on('interactionCreate', async interaction => {
                 interaction.user.id
             );
 
-            // ONLY THIS ROLE CAN USE SESSION COMMANDS
             if (!member.roles.cache.has(SESSION_ROLE_ID)) {
                 return interaction.reply({
                     content: 'You do not have permission to use /session.',
@@ -804,17 +900,29 @@ client.on('interactionCreate', async interaction => {
 
             const action = interaction.options.getSubcommand(true);
 
-            // VOTE: NO COOLDOWN, NO BUTTONS, NO ACTIVE VOTE CHECK
+            // SESSION VOTE
             if (action === 'vote') {
                 await interaction.deferReply({ ephemeral: true });
 
-                await interaction.channel.send({
-                    ...createSessionEmbed('vote'),
+                const voteMessage = await interaction.channel.send({
+                    ...createSessionEmbed('vote', 0),
                     allowedMentions: { parse: [] }
                 });
 
+                sessionVotes.set(voteMessage.id, {
+                    users: new Set(),
+                    completed: false,
+                    channelId: interaction.channelId
+                });
+
+                await voteMessage.edit({
+                    components: [
+                        createVoteButtonRow(voteMessage.id, 0, false)
+                    ]
+                });
+
                 return interaction.editReply({
-                    content: 'Session vote announcement posted.'
+                    content: 'Session vote posted!'
                 });
             }
 
