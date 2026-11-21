@@ -37,7 +37,7 @@ const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
 
 const ROTATING_STATUSES = [
     'ER:LC Players',
-    'Bringing SESSIONS!'
+    'Players In-Game'
 ];
 
 let statusIndex = 0;
