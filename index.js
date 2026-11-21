@@ -308,7 +308,7 @@ function createListEmbed(listType, list, page) {
                 return `**${start + index + 1}.** ${name} — *${staffLabel(playerPermission(item))}*`;
             }
 
-            return `**${start + index + 1}.** ${name`;
+            return `**${start + index + 1}.** ${name}`;
         }).join('\n')
         : (
             isStaff
