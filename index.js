@@ -442,7 +442,7 @@ function sessionServerLine() {
         '`JOIN CODE: hsrUV`',
         '`SERVER: Jackson Mississippi Role Play Strict VC Only`',
         '`OWNER: nateplayzzs`'
-    ].join('\n\n');
+    ].join('\n');
 }
 
 function createSessionEmbed(action, voteCount = 0) {
@@ -453,7 +453,7 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🟢 SESSION START',
             color: 0x2ECC71,
             text:
-                'Jackson Mississippi Roleplay Session is now live!\n\n' +
+                'Jackson Mississippi Roleplay Session is now live!\n' +
                 sessionServerLine() +
                 signoff
         },
@@ -462,7 +462,7 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🟡 SESSION LOW',
             color: 0xF1C40F,
             text:
-                'Session Low on Players! Join up to keep the session awake!\n\n' +
+                'Session Low on Players! Join up to keep the session awake!\n' +
                 sessionServerLine() +
                 signoff
         },
@@ -472,7 +472,7 @@ function createSessionEmbed(action, voteCount = 0) {
             color: 0x3498DB,
             text:
                 'Vote to get us to start the session!\n' +
-                '**5 votes are needed. If you vote, you MUST join!**\n\n' +
+                '**5 votes are needed. If you vote, you MUST join!**\n' +
             `**Votes: ${voteCount}/${SESSION_VOTES_REQUIRED}**\n\n` +
             sessionServerLine() +
             signoff
@@ -482,7 +482,7 @@ function createSessionEmbed(action, voteCount = 0) {
             title: '🔴 SESSION SHUTDOWN',
             color: 0xE74C3C,
             text:
-                'Session shutdown! Thanks for joining us for this session! Vote up our next session!\n\n' +
+                'Session shutdown! Thanks for joining us for this session! Vote up our next session!\n' +
                 sessionServerLine() +
             signoff
         }
