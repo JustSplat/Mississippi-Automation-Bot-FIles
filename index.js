@@ -26,6 +26,7 @@ const DEVID = process.env.DEVID;
 const ERLC_API_KEY = process.env.ERLC_API_KEY;
 const INGAME_ROLE_ID = process.env.INGAME_ROLE_ID;
 const GUILD_ID = process.env.GUILD_ID;
+const SESSION_PING_ROLE_ID = '1567075807619448860';
 
 const PANEL_URL = (process.env.PANEL_URL || '').replace(/\/+$/, '');
 const PANEL_SETUP_KEY = process.env.PANEL_SETUP_KEY;
@@ -428,7 +429,7 @@ function createSessionEmbed(action, voteCount = 0) {
                 'SESSION START UP!\n' +
                 'Jackson Mississippi Roleplay Session!\n\n' +
                 joinInfo + '\n' +
-                signoff
+            signoff
         },
 
         low: {
@@ -438,7 +439,7 @@ function createSessionEmbed(action, voteCount = 0) {
                 'Session Low on Players!\n' +
                 'Join up to keep the session awake!\n\n' +
                 joinInfo + '\n' +
-                signoff
+            signoff
         },
 
         vote: {
@@ -448,9 +449,9 @@ function createSessionEmbed(action, voteCount = 0) {
                 'Session Vote in place!\n' +
                 'Vote to get us to start the session!\n' +
                 `Votes: ${voteCount}/${VOTES_REQUIRED}\n` +
-                'If you voted you MUST join!\n\n' +
-                joinInfo + '\n' +
-                signoff
+            'If you voted you MUST join!\n\n' +
+            joinInfo + '\n' +
+            signoff
         },
 
         shutdown: {
@@ -461,7 +462,7 @@ function createSessionEmbed(action, voteCount = 0) {
                 'Thanks for joining us for this session!\n' +
                 'Vote up our next session!\n\n' +
                 joinInfo + '\n' +
-                signoff
+            signoff
         }
     };
 
@@ -494,6 +495,20 @@ function createSessionEmbed(action, voteCount = 0) {
         embeds: [embed],
         files
     };
+}
+
+// ==========================================
+// SESSION ANNOUNCEMENT PING (ADDED)
+// ==========================================
+
+async function sendSessionAnnouncement(channel, action, voteCount = 0) {
+    return channel.send({
+        content: `<@&${SESSION_PING_ROLE_ID}>`,
+        ...createSessionEmbed(action, voteCount),
+        allowedMentions: {
+            roles: [SESSION_PING_ROLE_ID]
+        }
+    });
 }
 
 // ==========================================
@@ -692,10 +707,7 @@ client.on('interactionCreate', async interaction => {
             });
 
             // Automatically post SESSION START when 5 votes are reached
-            await interaction.channel.send({
-                ...createSessionEmbed('start'),
-                allowedMentions: { parse: [] }
-            });
+            await sendSessionAnnouncement(interaction.channel, 'start');
 
             await interaction.followUp({
                 content: '✅ 5 votes reached! Session Start announcement posted!',
@@ -827,7 +839,7 @@ client.on('interactionCreate', async interaction => {
 
                 return interaction.editReply(
                     '✅ Panel password deletion request completed.'
-                );
+            );
 
             } catch (error) {
                 return interaction.editReply(
@@ -907,10 +919,11 @@ client.on('interactionCreate', async interaction => {
             if (action === 'vote') {
                 await interaction.deferReply({ ephemeral: true });
 
-                const voteMessage = await interaction.channel.send({
-                    ...createSessionEmbed('vote', 0),
-                    allowedMentions: { parse: [] }
-                });
+                const voteMessage = await sendSessionAnnouncement(
+                    interaction.channel,
+                    'vote',
+                    0
+                );
 
                 sessionVotes.set(voteMessage.id, {
                     users: new Set(),
@@ -932,10 +945,7 @@ client.on('interactionCreate', async interaction => {
             // START / SHUTDOWN / LOW
             await interaction.deferReply({ ephemeral: true });
 
-            await interaction.channel.send({
-                ...createSessionEmbed(action),
-                allowedMentions: { parse: [] }
-            });
+            await sendSessionAnnouncement(interaction.channel, action);
 
             return interaction.editReply({
                 content: 'Session announcement sent.'
