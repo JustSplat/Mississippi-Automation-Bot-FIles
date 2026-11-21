@@ -5,7 +5,13 @@ const {
     ActivityType,
     EmbedBuilder,
     SlashCommandBuilder,
-    AttachmentBuilder
+    AttachmentBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } = require('discord.js');
 
 const fs = require('node:fs');
@@ -107,13 +113,6 @@ async function panelRequest(endpoint, body = {}) {
 // ==========================================
 
 function passwordModal() {
-    const {
-        ModalBuilder,
-        ActionRowBuilder,
-        TextInputBuilder,
-        TextInputStyle
-    } = require('discord.js');
-
     const modal = new ModalBuilder()
         .setCustomId('passreg_password_modal')
         .setTitle('Set Panel Password');
@@ -135,12 +134,6 @@ function passwordModal() {
 }
 
 function deleteConfirmationButtons() {
-    const {
-        ActionRowBuilder,
-        ButtonBuilder,
-        ButtonStyle
-    } = require('discord.js');
-
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('passreg_delete_confirm')
@@ -327,12 +320,6 @@ function createListEmbed(listType, list, page) {
 }
 
 function createListButtons(listType, page, totalPages) {
-    const {
-        ActionRowBuilder,
-        ButtonBuilder,
-        ButtonStyle
-    } = require('discord.js');
-
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`erlc_list:${listType}:${page - 1}`)
@@ -414,21 +401,25 @@ function startAutoMessages() {
 const SESSION_ROLE_ID = '1573525177298329692';
 const SESSION_BANNER_PATH = path.join(__dirname, 'SESSIONBANNER.png');
 
-// Compact join information — one line
-function sessionServerLine() {
-    return '`JOIN CODE: hsrUV` • `SERVER: Jackson Mississippi Role Play Strict VC Only` • `OWNER: nateplayzzs`';
-}
-
 function createSessionEmbed(action) {
-    const signoff = '\n\n*Signed, JMRP Sessions Team.*';
 
+    // Join information — each on its own inline-code line
+    const joinInfo =
+        '`JOIN CODE: hsrUV`\n' +
+        '`SERVER: Jackson Mississippi Role Play Strict VC Only`\n' +
+        '`OWNER: nateplayzzs`';
+
+    const signoff = '*Signed, JMRP Sessions Team.*';
+
+    // NO BLANK LINES BETWEEN ANY OF THESE TEXT LINES
     const details = {
         start: {
             title: '🟢 SESSION START',
             color: 0x2ECC71,
             text:
+                'Session Start!\n' +
                 'Jackson Mississippi Roleplay Session!\n\n' +
-                sessionServerLine() +
+                joinInfo + '\n' +
                 signoff
         },
 
@@ -436,8 +427,9 @@ function createSessionEmbed(action) {
             title: '🟡 SESSION LOW',
             color: 0xF1C40F,
             text:
-                'Session Low on Players! Join up to keep the session awake!\n\n' +
-                sessionServerLine() +
+                'Session Low on Players!\n' +
+                'Join up to keep the session awake!\n\n' +
+                joinInfo + '\n' +
                 signoff
         },
 
@@ -445,9 +437,11 @@ function createSessionEmbed(action) {
             title: '🗳️ SESSION VOTE',
             color: 0x3498DB,
             text:
-                'Session Vote in place! Vote to get us to start the session! Votes needed: 5\n' +
+                'Session Vote in place!\n' +
+                'Vote to get us to start the session!\n' +
+                'Votes needed: 5\n' +
                 'If you voted you MUST join!\n\n' +
-                sessionServerLine() +
+                joinInfo + '\n' +
                 signoff
         },
 
@@ -455,8 +449,10 @@ function createSessionEmbed(action) {
             title: '🔴 SESSION SHUTDOWN',
             color: 0xE74C3C,
             text:
-                'Session shutdown! Thanks for joining us for this session! Vote up our next session!\n\n' +
-                sessionServerLine() +
+                'Session Shutdown!\n' +
+                'Thanks for joining us for this session!\n' +
+                'Vote up our next session!\n\n' +
+                joinInfo + '\n' +
                 signoff
         }
     };
@@ -561,6 +557,7 @@ client.once('ready', async () => {
         await guild.commands.set(commands);
 
         console.log('Slash commands successfully refreshed.');
+
     } catch (error) {
         console.error('Command refresh failed:', error);
     }
@@ -807,7 +804,7 @@ client.on('interactionCreate', async interaction => {
 
             const action = interaction.options.getSubcommand(true);
 
-            // NO COOLDOWN, NO ACTIVE-VOTE CHECK, NO VOTE BUTTON
+            // VOTE: NO COOLDOWN, NO BUTTONS, NO ACTIVE VOTE CHECK
             if (action === 'vote') {
                 await interaction.deferReply({ ephemeral: true });
 
@@ -906,6 +903,7 @@ client.on('messageCreate', async message => {
 
         try {
             await sendERLCList(message, listType);
+
         } catch (error) {
             console.error('ER:LC list command error:', error);
 
