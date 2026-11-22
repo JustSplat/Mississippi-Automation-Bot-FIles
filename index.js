@@ -493,7 +493,7 @@ function startAutoMessages() {
 function createSessionEmbed(action, voteCount = 0) {
     const joinInfo =
         'JOIN CODE: hsrUV\n' +
-        'SERVER: Jackson Mississippi Role Play Strict VC Only\n' +
+        'SERVER: Jackson Mississippi Roleplay I Strict I VC Only\n' +
         'OWNER: nateplayzz';
 
     const signoff = '*Signed, JMRP Sessions Team.*';
